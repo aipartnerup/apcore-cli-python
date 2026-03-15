@@ -1,3 +1,7 @@
+<div align="center">
+  <img src="https://raw.githubusercontent.com/aipartnerup/apcore-cli/main/apcore-cli-logo.svg" alt="apcore-cli logo" width="200"/>
+</div>
+
 # apcore-cli
 
 Terminal adapter for apcore. Execute AI-Perceivable modules from the command line.
