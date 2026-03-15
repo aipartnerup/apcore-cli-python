@@ -1,0 +1,65 @@
+{
+  "project": "apcore-cli-python",
+  "source": "../apcore-cli",
+  "created": "2026-03-14",
+  "features": {
+    "config-resolver": {
+      "status": "completed",
+      "plan": "config-resolver.md",
+      "priority": "P0",
+      "depends_on": []
+    },
+    "core-dispatcher": {
+      "status": "completed",
+      "plan": "core-dispatcher.md",
+      "priority": "P0",
+      "depends_on": ["config-resolver"]
+    },
+    "schema-parser": {
+      "status": "completed",
+      "plan": "schema-parser.md",
+      "priority": "P0",
+      "depends_on": ["core-dispatcher"]
+    },
+    "output-formatter": {
+      "status": "completed",
+      "plan": "output-formatter.md",
+      "priority": "P1",
+      "depends_on": ["core-dispatcher"]
+    },
+    "discovery": {
+      "status": "completed",
+      "plan": "discovery.md",
+      "priority": "P1",
+      "depends_on": ["core-dispatcher", "output-formatter"]
+    },
+    "approval-gate": {
+      "status": "completed",
+      "plan": "approval-gate.md",
+      "priority": "P1",
+      "depends_on": ["schema-parser"]
+    },
+    "security-manager": {
+      "status": "completed",
+      "plan": "security-manager.md",
+      "priority": "P1",
+      "depends_on": ["config-resolver"]
+    },
+    "shell-integration": {
+      "status": "completed",
+      "plan": "shell-integration.md",
+      "priority": "P2",
+      "depends_on": ["core-dispatcher", "schema-parser"]
+    }
+  },
+  "implementation_order": [
+    "config-resolver",
+    "core-dispatcher",
+    "schema-parser",
+    "output-formatter",
+    "discovery",
+    "approval-gate",
+    "security-manager",
+    "shell-integration"
+  ]
+}

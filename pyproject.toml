@@ -1,0 +1,85 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "apcore-cli"
+version = "0.1.0"
+description = "Terminal adapter for apcore — execute AI-Perceivable modules from the command line"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "aipartnerup", email = "team@aipartnerup.com" },
+]
+keywords = ["apcore", "cli", "terminal", "ai", "agent", "llm", "command-line", "automation", "shell", "unix"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Environment :: Console",
+]
+dependencies = [
+    "apcore>=0.13.0",
+    "click>=8.1",
+    "jsonschema>=4.20",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "keyring>=24.0",
+    "cryptography>=41.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "apdev[dev]>=0.2.3",
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "mypy>=1.0",
+    "ruff>=0.1",
+]
+
+[project.scripts]
+apcore-cli = "apcore_cli.__main__:main"
+
+[project.urls]
+Homepage = "https://aipartnerup.com"
+Repository = "https://github.com/aipartnerup/apcore-cli-python"
+Documentation = "https://github.com/aipartnerup/apcore-cli-python#readme"
+Issues = "https://github.com/aipartnerup/apcore-cli-python/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/apcore_cli"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+
+[tool.coverage.run]
+source = ["src/apcore_cli"]
+omit = ["src/apcore_cli/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+
+[tool.apdev]
+base_package = "apcore_cli"
+src_dir = "src"
