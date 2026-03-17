@@ -280,10 +280,10 @@ apcore-cli (the adapter)
     |
     +-- ConfigResolver       4-tier config precedence
     +-- LazyModuleGroup      Dynamic Click command generation
-    +-- SchemaParser         JSON Schema -> Click options
-    +-- RefResolver          $ref / allOf / anyOf / oneOf
-    +-- ApprovalGate         TTY-aware HITL approval
-    +-- OutputFormatter      TTY-adaptive JSON/table output
+    +-- schema_parser        JSON Schema -> Click options
+    +-- ref_resolver         $ref / allOf / anyOf / oneOf
+    +-- approval             TTY-aware HITL approval
+    +-- output               TTY-adaptive JSON/table output
     +-- AuditLogger          JSON Lines execution logging
     +-- Sandbox              Subprocess isolation
     |
