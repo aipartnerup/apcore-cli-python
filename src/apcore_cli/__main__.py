@@ -65,15 +65,25 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
     apcore_level = _default_level if _default_level <= logging.INFO else logging.ERROR
     logging.getLogger("apcore").setLevel(apcore_level)
 
+    config = ConfigResolver()
+
     if extensions_dir is not None:
         ext_dir = extensions_dir
     else:
-        config = ConfigResolver()
         ext_dir = config.resolve(
             "extensions.root",
             cli_flag="--extensions-dir",
             env_var="APCORE_EXTENSIONS_ROOT",
         )
+
+    help_text_max_length = config.resolve(
+        "cli.help_text_max_length",
+        env_var="APCORE_CLI_HELP_TEXT_MAX_LENGTH",
+    )
+    try:
+        help_text_max_length = int(help_text_max_length)
+    except (TypeError, ValueError):
+        help_text_max_length = 1000
 
     ext_dir_missing = not os.path.exists(ext_dir)
     ext_dir_unreadable = not ext_dir_missing and not os.access(ext_dir, os.R_OK)
@@ -119,6 +129,7 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
         cls=LazyModuleGroup,
         registry=registry,
         executor=executor,
+        help_text_max_length=help_text_max_length,
         name=prog_name,
         help="CLI adapter for the apcore module ecosystem.",
     )

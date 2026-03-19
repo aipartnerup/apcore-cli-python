@@ -205,9 +205,20 @@ class TestHelpAndCollisions:
         result = _extract_help({"description": "Regular help"})
         assert result == "Regular help"
 
-    def test_help_truncation(self):
-        long_text = "x" * 250
+    def test_help_truncation_default(self):
+        long_text = "x" * 1100
         result = _extract_help({"description": long_text})
+        assert len(result) == 1000
+        assert result.endswith("...")
+
+    def test_help_no_truncation_within_limit(self):
+        text = "x" * 999
+        result = _extract_help({"description": text})
+        assert result == text
+
+    def test_help_truncation_custom_max(self):
+        long_text = "x" * 300
+        result = _extract_help({"description": long_text}, max_length=200)
         assert len(result) == 200
         assert result.endswith("...")
 

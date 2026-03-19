@@ -8,7 +8,7 @@ Terminal adapter for apcore. Execute AI-Perceivable modules from the command lin
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-261%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-263%20passed-brightgreen.svg)]()
 
 | | |
 |---|---|
@@ -231,6 +231,7 @@ apcore-cli uses a 4-tier configuration precedence:
 | `APCORE_LOGGING_LEVEL` | Global apcore log level (fallback when `APCORE_CLI_LOGGING_LEVEL` is unset) | `WARNING` |
 | `APCORE_AUTH_API_KEY` | API key for remote registry authentication | *(unset)* |
 | `APCORE_CLI_SANDBOX` | Set to `1` to enable subprocess sandboxing | *(unset)* |
+| `APCORE_CLI_HELP_TEXT_MAX_LENGTH` | Maximum characters for CLI option help text before truncation | `1000` |
 
 ### Config File (`apcore.yaml`)
 
@@ -241,6 +242,8 @@ logging:
   level: DEBUG
 sandbox:
   enabled: false
+cli:
+  help_text_max_length: 1000
 ```
 
 ## Features
@@ -378,7 +381,7 @@ apcore-cli --extensions-dir ./extensions greet.hello --name Alice --greeting Hi
 git clone https://github.com/aipartnerup/apcore-cli-python.git
 cd apcore-cli-python
 pip install -e ".[dev]"
-pytest                           # 261 tests
+pytest                           # 263 tests
 pytest --cov                     # with coverage report
 bash examples/run_examples.sh   # run all examples
 ```

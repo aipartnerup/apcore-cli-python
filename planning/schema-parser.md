@@ -83,7 +83,7 @@
 - `tests/test_schema_parser.py`:
   - `test_help_from_x_llm_description`: `x-llm-description` present → used over `description`.
   - `test_help_from_description`: Only `description` → used.
-  - `test_help_truncation`: Description > 200 chars → truncated to 197 + "...".
+  - `test_help_truncation_default`: Description > 1000 chars (default) → truncated to 997 + "...".
   - `test_help_none`: No description fields → `None`.
   - `test_flag_collision_detection`: Properties `foo_bar` and `foo-bar` both map to `--foo-bar` → exit 48.
 

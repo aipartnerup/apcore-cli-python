@@ -5,6 +5,25 @@ All notable changes to apcore-cli (Python SDK) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-03-19
+
+### Changed
+- Help text truncation limit increased from 200 to 1000 characters (configurable via `cli.help_text_max_length` config key)
+- `_extract_help`: added `max_length: int = 1000` parameter (`schema_parser.py`)
+- `schema_to_click_options`: added `max_help_length: int = 1000` parameter (`schema_parser.py`)
+- `build_module_command`: added `help_text_max_length: int = 1000` parameter, threaded through to schema parser (`cli.py`)
+- `LazyModuleGroup`: constructor accepts `help_text_max_length: int = 1000`, passes to `build_module_command` (`cli.py`)
+- `create_cli`: resolves `cli.help_text_max_length` from `ConfigResolver` and passes to `LazyModuleGroup` (`__main__.py`)
+- `format_exec_result`: nested dict/list values in table mode now rendered with `json.dumps` instead of `str()` (`output.py`)
+
+### Added
+- `cli.help_text_max_length` config key (default: 1000) in `ConfigResolver.DEFAULTS` (`config.py`)
+- `APCORE_CLI_HELP_TEXT_MAX_LENGTH` environment variable support for configuring help text max length
+- `test_help_truncation_default`: tests default 1000-char truncation
+- `test_help_no_truncation_within_limit`: tests no truncation at 999 chars
+- `test_help_truncation_custom_max`: tests custom max_length parameter
+- 263 tests (up from 261)
+
 ## [0.2.0] - 2026-03-16
 
 ### Added

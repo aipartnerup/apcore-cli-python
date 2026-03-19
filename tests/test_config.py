@@ -26,6 +26,7 @@ class TestConfigResolverSkeleton:
             "logging.level",
             "sandbox.enabled",
             "cli.stdin_buffer_limit",
+            "cli.help_text_max_length",
         ]
         for key in expected_keys:
             assert key in resolver.DEFAULTS, f"Missing default key: {key}"

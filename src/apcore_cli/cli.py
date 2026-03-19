@@ -41,10 +41,17 @@ def set_audit_logger(audit_logger: AuditLogger | None) -> None:
 class LazyModuleGroup(click.Group):
     """Custom Click Group that lazily loads apcore modules as subcommands."""
 
-    def __init__(self, registry: Registry, executor: Executor, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        registry: Registry,
+        executor: Executor,
+        help_text_max_length: int = 1000,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(**kwargs)
         self._registry = registry
         self._executor = executor
+        self._help_text_max_length = help_text_max_length
         self._module_cache: dict[str, click.Command] = {}
 
     def list_commands(self, ctx: click.Context) -> list[str]:
@@ -70,7 +77,7 @@ class LazyModuleGroup(click.Group):
         if module_def is None:
             return None
 
-        cmd = build_module_command(module_def, self._executor)
+        cmd = build_module_command(module_def, self._executor, help_text_max_length=self._help_text_max_length)
         self._module_cache[cmd_name] = cmd
         return cmd
 
@@ -101,7 +108,11 @@ def _get_module_id(module_def: ModuleDescriptor) -> str:
     return module_def.module_id
 
 
-def build_module_command(module_def: ModuleDescriptor, executor: Executor) -> click.Command:
+def build_module_command(
+    module_def: ModuleDescriptor,
+    executor: Executor,
+    help_text_max_length: int = 1000,
+) -> click.Command:
     """Build a Click command from an apcore module definition.
 
     Generates Click options from the module's input_schema, wires up
@@ -137,7 +148,7 @@ def build_module_command(module_def: ModuleDescriptor, executor: Executor) -> cl
     else:
         resolved_schema = input_schema
 
-    schema_options = schema_to_click_options(resolved_schema)
+    schema_options = schema_to_click_options(resolved_schema, max_help_length=help_text_max_length)
 
     def callback(**kwargs: Any) -> None:
         # Separate built-in options from schema-generated kwargs

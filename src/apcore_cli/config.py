@@ -22,6 +22,7 @@ class ConfigResolver:
         "sandbox.enabled": False,
         "cli.stdin_buffer_limit": 10_485_760,  # 10 MB
         "cli.auto_approve": False,
+        "cli.help_text_max_length": 1000,
     }
 
     def __init__(

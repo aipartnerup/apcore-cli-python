@@ -50,19 +50,19 @@ def _map_type(prop_name: str, prop_schema: dict) -> Any:
     return result
 
 
-def _extract_help(prop_schema: dict) -> str | None:
+def _extract_help(prop_schema: dict, max_length: int = 1000) -> str | None:
     """Extract help text from schema property, preferring x-llm-description."""
     text = prop_schema.get("x-llm-description")
     if not text:
         text = prop_schema.get("description")
     if not text:
         return None
-    if len(text) > 200:
-        return text[:197] + "..."
+    if max_length > 0 and len(text) > max_length:
+        return text[: max_length - 3] + "..."
     return text
 
 
-def schema_to_click_options(schema: dict) -> list[click.Option]:
+def schema_to_click_options(schema: dict, max_help_length: int = 1000) -> list[click.Option]:
     """Convert JSON Schema properties to a list of Click options."""
     properties = schema.get("properties", {})
     required_list = schema.get("required", [])
@@ -93,7 +93,7 @@ def schema_to_click_options(schema: dict) -> list[click.Option]:
 
         click_type = _map_type(prop_name, prop_schema)
         is_required = prop_name in required_list
-        _help_base = _extract_help(prop_schema)
+        _help_base = _extract_help(prop_schema, max_length=max_help_length)
         # Append [required] to help text for user clarity; do NOT set required=True
         # at the Click level because that would block --input - (STDIN) from working.
         # Schema-level required validation happens in the callback via jsonschema.validate().
