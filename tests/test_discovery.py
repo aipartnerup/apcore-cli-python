@@ -146,3 +146,152 @@ class TestDescribeCommand:
         result = runner.invoke(cli, ["describe", "simple", "--format", "json"])
         data = json.loads(result.output)
         assert "annotations" not in data
+
+
+class TestFormatGroupedModuleList:
+    def test_grouped_output_shows_group_tables(self, capsys):
+        from apcore_cli.output import format_grouped_module_list
+
+        grouped = {
+            "product": [("list", "List products", ["shop"]), ("get", "Get product", [])],
+            None: [("standalone", "Standalone command", ["misc"])],
+        }
+        format_grouped_module_list(grouped)
+        out = capsys.readouterr().out
+        assert "product" in out
+        assert "list" in out
+        assert "standalone" in out
+
+    def test_grouped_output_empty(self, capsys):
+        from apcore_cli.output import format_grouped_module_list
+
+        format_grouped_module_list({})
+        out = capsys.readouterr().out
+        assert "No modules found" in out
+
+
+def _make_mock_module_with_display(module_id, description="A module.", tags=None, display=None):
+    """Create a mock module with display overlay metadata."""
+    m = _make_mock_module(module_id, description, tags)
+    m.metadata = {"display": display} if display else {}
+    return m
+
+
+class TestGroupedDiscovery:
+    """Tests for grouped display in list and describe commands."""
+
+    def test_list_flat_flag(self):
+        """--flat flag produces flat table output (no group headers)."""
+        modules = [
+            _make_mock_module_with_display(
+                "product.list",
+                "List products.",
+                ["commerce"],
+                display={"cli": {"group": "product", "alias": "list"}},
+            ),
+            _make_mock_module_with_display(
+                "product.get",
+                "Get product.",
+                ["commerce"],
+                display={"cli": {"group": "product", "alias": "get"}},
+            ),
+        ]
+        cli = _make_cli_with_modules(modules)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", "--flat", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 2
+        ids = [m["id"] for m in data]
+        assert "list" in ids
+        assert "get" in ids
+
+    def test_list_default_grouped_display(self):
+        """Default list (no --flat) shows group headers in table format."""
+        modules = [
+            _make_mock_module_with_display(
+                "product.list",
+                "List products.",
+                ["commerce"],
+                display={"cli": {"group": "product", "alias": "list"}},
+            ),
+            _make_mock_module_with_display(
+                "product.get",
+                "Get product.",
+                ["commerce"],
+                display={"cli": {"group": "product", "alias": "get"}},
+            ),
+            _make_mock_module_with_display(
+                "healthcheck",
+                "Health check.",
+                [],
+                display={"cli": {"group": "", "alias": "healthcheck"}},
+            ),
+        ]
+        cli = _make_cli_with_modules(modules)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", "--format", "table"])
+        assert result.exit_code == 0
+        # Group header for "product" should appear
+        assert "product" in result.output
+        # Commands within the group
+        assert "list" in result.output
+        assert "get" in result.output
+        # Top-level module in "Other" section
+        assert "Other" in result.output
+        assert "healthcheck" in result.output
+
+    def test_list_grouped_dot_notation_fallback(self):
+        """Modules with dotted alias but no explicit group use dot-split grouping."""
+        modules = [
+            _make_mock_module("order.create", "Create order.", ["commerce"]),
+            _make_mock_module("order.cancel", "Cancel order.", ["commerce"]),
+        ]
+        cli = _make_cli_with_modules(modules)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", "--format", "table"])
+        assert result.exit_code == 0
+        # Should group under "order"
+        assert "order" in result.output
+        assert "create" in result.output
+        assert "cancel" in result.output
+
+    def test_list_grouped_empty_registry(self):
+        """Grouped list with no modules shows empty message."""
+        cli = _make_cli_with_modules([])
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", "--format", "table"])
+        assert result.exit_code == 0
+        assert "No modules found." in result.output
+
+    def test_list_grouped_tag_filter_no_match(self):
+        """Grouped list with tag filter and no matches shows tag-specific message."""
+        modules = [_make_mock_module("order.create", "Create.", ["commerce"])]
+        cli = _make_cli_with_modules(modules)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["list", "--tag", "nonexistent", "--format", "table"])
+        assert result.exit_code == 0
+        assert "No modules found matching tags: nonexistent" in result.output
+
+    def test_describe_group_dot_command(self):
+        """describe with dotted module_id (e.g. product.list) works."""
+        modules = [_make_mock_module("product.list", "List products.", ["commerce"])]
+        cli = _make_cli_with_modules(modules)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["describe", "product.list", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == "product.list"
+        assert data["description"] == "List products."
+
+    def test_describe_full_module_id(self):
+        """describe with a longer canonical module_id works."""
+        modules = [
+            _make_mock_module("product.list_products.get", "Get product list.", ["commerce"]),
+        ]
+        cli = _make_cli_with_modules(modules)
+        runner = CliRunner()
+        result = runner.invoke(cli, ["describe", "product.list_products.get", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert data["id"] == "product.list_products.get"

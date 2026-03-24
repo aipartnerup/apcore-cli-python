@@ -95,6 +95,40 @@ class TestFormatModuleList:
         assert len(data) == 1
         assert data[0]["id"] == "math.add"
 
+    def test_format_list_json_uses_display_overlay(self, capsys):
+        """JSON output must use display overlay alias, description, and tags — not raw scanner values."""
+        m = _make_mock_module(
+            "payment.get_status_payment__payment_id_.get",
+            "Raw scanner description",
+            tags=["raw"],
+            metadata={
+                "display": {
+                    "alias": "pay-status",
+                    "tags": ["payment", "v2"],
+                    "cli": {
+                        "alias": "pay-status",
+                        "description": "Check payment status",
+                    },
+                }
+            },
+        )
+        format_module_list([m], "json")
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert data[0]["id"] == "pay-status"
+        assert data[0]["description"] == "Check payment status"
+        assert data[0]["tags"] == ["payment", "v2"]
+
+    def test_format_list_json_falls_back_to_scanner_when_no_overlay(self, capsys):
+        """JSON output falls back to scanner values when no display overlay is present."""
+        m = _make_mock_module("math.add", "Add two numbers.", ["math"])
+        format_module_list([m], "json")
+        out = capsys.readouterr().out
+        data = json.loads(out)
+        assert data[0]["id"] == "math.add"
+        assert data[0]["description"] == "Add two numbers."
+        assert data[0]["tags"] == ["math"]
+
     def test_format_list_json_empty(self, capsys):
         format_module_list([], "json")
         out = capsys.readouterr().out

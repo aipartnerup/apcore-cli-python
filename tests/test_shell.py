@@ -134,6 +134,53 @@ class TestCompletionCommand:
         assert result.exit_code == 2
 
 
+class TestGroupedCompletion:
+    """Tests for shell completion with grouped (dotted) module IDs."""
+
+    def test_bash_completion_includes_groups(self):
+        """Bash completion script contains group extraction logic (split('.')[0])."""
+        script = _generate_bash_completion(_PROG)
+        # Should contain logic to extract group names from dotted IDs
+        assert "split('.')[0]" in script
+        # Should contain logic to identify top-level vs grouped modules
+        assert "groups" in script
+
+    def test_bash_completion_nested_commands(self):
+        """Bash completion script contains logic for COMP_CWORD=2 group command completion."""
+        script = _generate_bash_completion(_PROG)
+        # Should have a block for position 2 that handles group sub-commands
+        assert "COMP_CWORD} -eq 2" in script
+        # Should extract sub-commands by splitting on dot
+        assert "split('.',1)[1]" in script
+
+    def test_bash_completion_groups_and_builtins_at_position1(self):
+        """Position 1 completes builtins + groups + top-level modules."""
+        script = _generate_bash_completion(_PROG)
+        assert "builtins" in script
+        assert "all_ids" in script or "groups" in script
+
+    def test_zsh_completion_includes_groups(self):
+        """Zsh completion includes group extraction and group sub-command completion."""
+        script = _generate_zsh_completion(_PROG)
+        # Should contain group extraction logic
+        assert "split('.')[0]" in script
+        # Should contain group sub-command completion in the args state
+        assert "group_cmds" in script
+
+    def test_zsh_completion_groups_at_position1(self):
+        """Zsh completion offers groups alongside built-in commands at position 1."""
+        script = _generate_zsh_completion(_PROG)
+        assert "groups_and_top" in script
+
+    def test_fish_completion_includes_groups(self):
+        """Fish completion includes group extraction and group sub-command completion."""
+        script = _generate_fish_completion(_PROG)
+        # Should contain group extraction logic
+        assert "split('.')[0]" in script
+        # Should contain a helper function for group sub-commands
+        assert "__apcore_group_cmds" in script
+
+
 class TestManCommand:
     def test_man_list(self):
         cli = _make_cli()

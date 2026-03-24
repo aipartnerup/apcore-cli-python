@@ -5,6 +5,57 @@ All notable changes to apcore-cli (Python SDK) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-23
+
+### Added
+
+- **Display overlay routing** (§5.13) — `LazyModuleGroup` now reads `metadata["display"]["cli"]` for alias and description when building the command list and routing `get_command()`. Commands are exposed under their CLI alias instead of raw module_id.
+  - `_alias_map`: built from `metadata["display"]["cli"]["alias"]` (with module_id fallback), enabling `apcore-cli alias-name` invocation.
+  - `_descriptor_cache`: populated during alias map build to avoid double `registry.get_definition()` calls in `get_command()`.
+  - `_alias_map_built` flag only set on successful build, allowing retry after transient registry errors.
+- **Display overlay in JSON output** — `format_module_list(..., "json")` now reads `metadata["display"]["cli"]` for `id`, `description`, and `tags`, consistent with the table output branch.
+
+### Changed
+
+- `_ERROR_CODE_MAP.get(error_code, 1)`: guarded with `isinstance(error_code, str)` to prevent `None`-key lookup.
+- Runtime companion: `apcore-toolkit >= 0.4.0` enables `DisplayResolver` and `ConventionScanner` (graceful fallback when not installed).
+
+### Tests
+
+- `TestDisplayOverlayAliasRouting` (6 tests): `list_commands` uses CLI alias, `get_command` by alias, cache hit path, module_id fallback, `build_module_command` alias and description.
+- `test_format_list_json_uses_display_overlay`: JSON output uses display overlay alias/description/tags.
+- `test_format_list_json_falls_back_to_scanner_when_no_overlay`: JSON output falls back to scanner values.
+
+### Added (Grouped Commands — FE-09)
+
+- **`GroupedModuleGroup(LazyModuleGroup)`** — organizes modules into nested `click.Group` subcommands based on namespace prefixes. Auto-groups by first `.` segment, with `display.cli.group` override from binding.yaml.
+  - `_resolve_group()` — 3-tier group resolution: explicit `display.cli.group` > first `.` segment of CLI alias > top-level.
+  - `_build_group_map()` — lazy, idempotent group map builder with builtin collision detection and shell-safe group name validation.
+  - `format_help()` — collapsed root help with Commands, Modules, and Groups sections (with command counts).
+- **`_LazyGroup(click.Group)`** — nested group that lazily builds subcommands from module descriptors.
+- **`list --flat` flag** — opt-in flat display mode for `list` command; default is now grouped display.
+- **`format_grouped_module_list()`** — Rich table output grouped by namespace.
+- **Updated shell completions** — bash/zsh/fish completion scripts handle two-level group/command structure.
+
+### Changed (Grouped Commands)
+
+- `create_cli()` now uses `GroupedModuleGroup` instead of `LazyModuleGroup`.
+
+### Tests (Grouped Commands)
+
+- 48 new tests: `TestResolveGroup` (8+), `TestBuildGroupMap` (5+), `TestGroupedModuleGroupRouting` (7), `TestLazyGroupInner` (4), `TestGroupedHelpDisplay` (5), `TestCreateCliGrouped` (1), `TestGroupedE2E` (5), `TestGroupedDiscovery` (7+), `TestGroupedCompletion` (6).
+
+### Added (Convention Module Discovery — §5.14)
+
+- **`apcore-cli init module <id>`** — scaffolding command with `--style` (decorator, convention, binding) and `--description` options. Generates module templates in the appropriate directory.
+- **`--commands-dir` CLI option** — path to a convention commands directory. When set, `ConventionScanner` from `apcore-toolkit` scans for plain functions and registers them as modules.
+
+### Tests (Convention Module Discovery)
+
+- 6 new tests in `tests/test_init_cmd.py` covering all three styles and options.
+
+---
+
 ## [0.2.2] - 2026-03-22
 
 ### Changed

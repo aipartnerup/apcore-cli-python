@@ -50,6 +50,23 @@
       "plan": "shell-integration.md",
       "priority": "P2",
       "depends_on": ["core-dispatcher", "schema-parser"]
+    },
+    "grouped-commands": {
+      "status": "completed",
+      "plan": "grouped-commands.md",
+      "priority": "P0",
+      "depends_on": ["core-dispatcher", "discovery", "output-formatter", "shell-integration"],
+      "tasks": {
+        "task-1-resolve-group": "completed",
+        "task-2-build-group-map": "completed",
+        "task-3-list-get-command": "completed",
+        "task-4-lazy-group": "completed",
+        "task-5-format-help": "completed",
+        "task-6-wire-create-cli": "completed",
+        "task-7-discovery-grouped": "completed",
+        "task-8-shell-completion": "completed",
+        "task-9-e2e-integration": "completed"
+      }
     }
   },
   "implementation_order": [
@@ -60,6 +77,7 @@
     "discovery",
     "approval-gate",
     "security-manager",
-    "shell-integration"
+    "shell-integration",
+    "grouped-commands"
   ]
 }

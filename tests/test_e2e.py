@@ -256,6 +256,16 @@ class TestRealDiscovery:
         runner = CliRunner()
         result = runner.invoke(real_cli, ["list", "--format", "table"])
         assert result.exit_code == 0
+        # Grouped display: group header "math" and command "add" appear separately
+        assert "math" in result.output
+        assert "add" in result.output
+        assert "text" in result.output
+        assert "upper" in result.output
+
+    def test_list_flat_table_format(self, real_cli):
+        runner = CliRunner()
+        result = runner.invoke(real_cli, ["list", "--flat", "--format", "table"])
+        assert result.exit_code == 0
         assert "math.add" in result.output
         assert "text.upper" in result.output
 

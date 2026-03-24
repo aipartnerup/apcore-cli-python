@@ -9,7 +9,7 @@ import sys
 import click
 
 from apcore_cli import __version__
-from apcore_cli.cli import LazyModuleGroup, set_audit_logger
+from apcore_cli.cli import GroupedModuleGroup, set_audit_logger
 from apcore_cli.config import ConfigResolver
 from apcore_cli.discovery import register_discovery_commands
 from apcore_cli.security.audit import AuditLogger
@@ -20,23 +20,36 @@ logger = logging.getLogger("apcore_cli")
 EXIT_CONFIG_NOT_FOUND = 47
 
 
-def _extract_extensions_dir(argv: list[str] | None = None) -> str | None:
-    """Extract --extensions-dir value from argv before Click parses it.
+def _extract_argv_option(argv: list[str] | None, flag: str) -> str | None:
+    """Extract an option value from argv before Click parses it.
 
-    This is needed because the registry must be created before Click runs,
-    but --extensions-dir is a Click option parsed at runtime.
+    This is needed because certain options must be resolved before Click runs.
     Returns None if the flag is not present.
     """
     args = argv if argv is not None else sys.argv[1:]
     for i, arg in enumerate(args):
-        if arg == "--extensions-dir" and i + 1 < len(args):
+        if arg == flag and i + 1 < len(args):
             return args[i + 1]
-        if arg.startswith("--extensions-dir="):
+        if arg.startswith(f"{flag}="):
             return arg.split("=", 1)[1]
     return None
 
 
-def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) -> click.Group:
+def _extract_extensions_dir(argv: list[str] | None = None) -> str | None:
+    """Extract --extensions-dir value from argv before Click parses it."""
+    return _extract_argv_option(argv, "--extensions-dir")
+
+
+def _extract_commands_dir(argv: list[str] | None = None) -> str | None:
+    """Extract --commands-dir value from argv before Click parses it."""
+    return _extract_argv_option(argv, "--commands-dir")
+
+
+def create_cli(
+    extensions_dir: str | None = None,
+    prog_name: str | None = None,
+    commands_dir: str | None = None,
+) -> click.Group:
     """Create the CLI application.
 
     Args:
@@ -46,6 +59,9 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
                    Defaults to the basename of sys.argv[0], so downstream projects
                    that install their own entry-point script get the correct name
                    automatically (e.g. ``mycli`` instead of ``apcore-cli``).
+        commands_dir: Directory containing convention-based modules.
+                      When set, scans for plain-function modules and registers
+                      them via ConventionScanner (requires apcore-toolkit).
     """
     if prog_name is None:
         prog_name = os.path.basename(sys.argv[0]) or "apcore-cli"
@@ -113,6 +129,23 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
         except Exception as e:
             logger.warning("Discovery failed: %s", e)
 
+        # Convention module discovery
+        if commands_dir is not None:
+            try:
+                from apcore_toolkit import RegistryWriter
+                from apcore_toolkit.convention_scanner import ConventionScanner
+
+                conv_scanner = ConventionScanner()
+                conv_modules = conv_scanner.scan(commands_dir)
+                if conv_modules:
+                    writer = RegistryWriter(registry=registry)
+                    writer.write(conv_modules)
+                    logger.info("Convention scanner: registered %d modules from %s", len(conv_modules), commands_dir)
+            except ImportError:
+                logger.warning("apcore-toolkit not installed — convention module scanning unavailable")
+            except Exception as e:
+                logger.warning("Convention module scanning failed: %s", e)
+
         executor = Executor(registry)
     except Exception as e:
         click.echo(f"Error: Failed to initialize registry: {e}", err=True)
@@ -126,7 +159,7 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
         logger.warning("Failed to initialize audit logger: %s", e)
 
     @click.group(
-        cls=LazyModuleGroup,
+        cls=GroupedModuleGroup,
         registry=registry,
         executor=executor,
         help_text_max_length=help_text_max_length,
@@ -144,13 +177,24 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
         help="Path to apcore extensions directory.",
     )
     @click.option(
+        "--commands-dir",
+        "commands_dir_opt",
+        default=None,
+        help="Path to convention-based commands directory.",
+    )
+    @click.option(
         "--log-level",
         default=None,
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
         help="Log verbosity. Overrides APCORE_CLI_LOGGING_LEVEL and APCORE_LOGGING_LEVEL env vars.",
     )
     @click.pass_context
-    def cli(ctx: click.Context, extensions_dir_opt: str | None = None, log_level: str | None = None) -> None:
+    def cli(
+        ctx: click.Context,
+        extensions_dir_opt: str | None = None,
+        commands_dir_opt: str | None = None,
+        log_level: str | None = None,
+    ) -> None:
         if log_level is not None:
             # basicConfig() is a no-op once handlers exist; set level on the root logger directly.
             level = getattr(logging, log_level.upper(), logging.WARNING)
@@ -167,6 +211,11 @@ def create_cli(extensions_dir: str | None = None, prog_name: str | None = None) 
     # Register shell integration commands
     register_shell_commands(cli, prog_name=prog_name)
 
+    # Register init scaffolding command
+    from apcore_cli.init_cmd import register_init_command
+
+    register_init_command(cli)
+
     return cli
 
 
@@ -178,7 +227,8 @@ def main(prog_name: str | None = None) -> None:
                    When None, inferred from sys.argv[0] automatically.
     """
     ext_dir = _extract_extensions_dir()
-    cli = create_cli(extensions_dir=ext_dir, prog_name=prog_name)
+    cmd_dir = _extract_commands_dir()
+    cli = create_cli(extensions_dir=ext_dir, prog_name=prog_name, commands_dir=cmd_dir)
     cli(standalone_mode=True)
 
 

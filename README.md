@@ -8,7 +8,7 @@ Terminal adapter for apcore. Execute AI-Perceivable modules from the command lin
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-263%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-319%2B%20passed-brightgreen.svg)]()
 
 | | |
 |---|---|
@@ -117,6 +117,37 @@ def cli():
 
 cli()
 ```
+
+## Adding Custom Commands
+
+### Fastest way (30 seconds)
+
+```bash
+apcore-cli init module ops.deploy -d "Deploy to environment"
+# Edit the generated file, add your logic
+```
+
+### Zero-import way (convention discovery)
+
+Drop a plain Python function into `commands/`:
+
+```python
+# commands/deploy.py
+def deploy(env: str, tag: str = "latest") -> dict:
+    """Deploy the app to the given environment."""
+    return {"status": "deployed", "env": env}
+```
+
+Then run with `--commands-dir commands/`:
+
+```bash
+apcore-cli --commands-dir commands/ deploy deploy --env prod
+```
+
+The `init module` command supports three styles via `--style`:
+- **convention** (default) — generates a plain Python function in the commands directory
+- **decorator** — generates a `@module`-decorated function in the extensions directory
+- **binding** — generates a `.binding.yaml` file
 
 ## Integration with Existing Projects
 
@@ -249,6 +280,8 @@ cli:
 ## Features
 
 - **Auto-discovery** -- all modules in the extensions directory are found and exposed as CLI commands
+- **Display overlay** -- `metadata["display"]["cli"]` controls CLI command names, descriptions, and guidance per module (§5.13); set via `binding_path` in `create_cli()` / `fastapi-apcore`
+- **Grouped commands** -- modules with dots in their names are auto-grouped into nested subcommands (`apcore-cli product list` instead of `apcore-cli product.list`); `display.cli.group` in binding.yaml overrides the auto-detected group
 - **Auto-generated flags** -- JSON Schema `input_schema` is converted to `--flag value` CLI options with type validation
 - **Boolean flag pairs** -- `--verbose` / `--no-verbose` from `"type": "boolean"` schema properties
 - **Enum choices** -- `"enum": ["json", "csv"]` becomes `--format json` with Click validation
@@ -267,8 +300,8 @@ cli:
 
 | apcore | CLI |
 |--------|-----|
-| `module_id` (`math.add`) | Command name (`apcore-cli math.add`) |
-| `description` | `--help` text |
+| `metadata["display"]["cli"]["alias"]` or `module_id` | Command name — auto-grouped by first `.` segment (`apcore-cli product get`) |
+| `metadata["display"]["cli"]["description"]` or `description` | `--help` text |
 | `input_schema.properties` | CLI flags (`--a`, `--b`) |
 | `input_schema.required` | Validated post-collection via `jsonschema.validate()` (required fields shown as `[required]` in `--help`) |
 | `annotations.requires_approval` | HITL approval prompt |
@@ -381,7 +414,7 @@ apcore-cli --extensions-dir ./extensions greet.hello --name Alice --greeting Hi
 git clone https://github.com/aiperceivable/apcore-cli-python.git
 cd apcore-cli-python
 pip install -e ".[dev]"
-pytest                           # 263 tests
+pytest                           # 319+ tests
 pytest --cov                     # with coverage report
 bash examples/run_examples.sh   # run all examples
 ```

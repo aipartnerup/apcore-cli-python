@@ -25,22 +25,55 @@ def _generate_bash_completion(prog_name: str) -> str:
         ' | python3 -c "import sys,json;'
         "[print(m['id']) for m in json.load(sys.stdin)]\" 2>/dev/null"
     )
+    # Command to extract group names and top-level (ungrouped) module IDs
+    groups_and_top_cmd = (
+        f"{quoted} list --format json 2>/dev/null"
+        ' | python3 -c "'
+        "import sys,json\n"
+        "ids=[m['id'] for m in json.load(sys.stdin)]\n"
+        "groups=set()\n"
+        "top=[]\n"
+        "for i in ids:\n"
+        "    if '.' in i: groups.add(i.split('.')[0])\n"
+        "    else: top.append(i)\n"
+        "print(' '.join(sorted(groups)+sorted(top)))\n"
+        '" 2>/dev/null'
+    )
+    # Command to list sub-commands for a given group (uses shell variable $grp)
+    group_cmds_cmd = (
+        f"{quoted} list --format json 2>/dev/null"
+        ' | python3 -c "'
+        "import sys,json,os\n"
+        "g=os.environ['_APCORE_GRP']\n"
+        "ids=[m['id'] for m in json.load(sys.stdin)]\n"
+        "for i in ids:\n"
+        "    if '.' in i and i.split('.')[0]==g: print(i.split('.',1)[1])\n"
+        '" 2>/dev/null'
+    )
     return (
         f"{fn}() {{\n"
-        "    local cur prev opts\n"
+        "    local cur prev\n"
         "    COMPREPLY=()\n"
         '    cur="${COMP_WORDS[COMP_CWORD]}"\n'
         '    prev="${COMP_WORDS[COMP_CWORD-1]}"\n'
         "\n"
         "    if [[ ${COMP_CWORD} -eq 1 ]]; then\n"
-        '        opts="exec list describe completion man"\n'
-        '        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )\n'
+        f"        local all_ids=$({groups_and_top_cmd})\n"
+        '        local builtins="exec list describe completion man"\n'
+        '        COMPREPLY=( $(compgen -W "${builtins} ${all_ids}" -- ${cur}) )\n'
         "        return 0\n"
         "    fi\n"
         "\n"
         f'    if [[ "${{COMP_WORDS[1]}}" == "exec" && ${{COMP_CWORD}} -eq 2 ]]; then\n'
         f"        local modules=$({module_list_cmd})\n"
         '        COMPREPLY=( $(compgen -W "${modules}" -- ${cur}) )\n'
+        "        return 0\n"
+        "    fi\n"
+        "\n"
+        "    if [[ ${COMP_CWORD} -eq 2 ]]; then\n"
+        '        local grp="${COMP_WORDS[1]}"\n'
+        f'        local cmds=$(export _APCORE_GRP="$grp"; {group_cmds_cmd})\n'
+        '        COMPREPLY=( $(compgen -W "${cmds}" -- ${cur}) )\n'
         "        return 0\n"
         "    fi\n"
         "}\n"
@@ -56,11 +89,36 @@ def _generate_zsh_completion(prog_name: str) -> str:
         ' | python3 -c "import sys,json;'
         "[print(m['id']) for m in json.load(sys.stdin)]\" 2>/dev/null"
     )
+    # Command to extract group names and top-level module IDs for position 1
+    groups_and_top_cmd = (
+        f"{quoted} list --format json 2>/dev/null"
+        ' | python3 -c "'
+        "import sys,json\n"
+        "ids=[m['id'] for m in json.load(sys.stdin)]\n"
+        "groups=set()\n"
+        "top=[]\n"
+        "for i in ids:\n"
+        "    if '.' in i: groups.add(i.split('.')[0])\n"
+        "    else: top.append(i)\n"
+        "print(' '.join(sorted(groups)+sorted(top)))\n"
+        '" 2>/dev/null'
+    )
+    # Command to list sub-commands for a given group ($1 is the group name)
+    group_cmds_cmd = (
+        f"{quoted} list --format json 2>/dev/null"
+        ' | python3 -c "'
+        "import sys,json,os\n"
+        "g=os.environ['_APCORE_GRP']\n"
+        "ids=[m['id'] for m in json.load(sys.stdin)]\n"
+        "for i in ids:\n"
+        "    if '.' in i and i.split('.')[0]==g: print(i.split('.',1)[1])\n"
+        '" 2>/dev/null'
+    )
     return (
         f"#compdef {prog_name}\n"
         "\n"
         f"{fn}() {{\n"
-        "    local -a commands\n"
+        "    local -a commands groups_and_top\n"
         "    commands=(\n"
         "        'exec:Execute an apcore module'\n"
         "        'list:List available modules'\n"
@@ -75,7 +133,9 @@ def _generate_zsh_completion(prog_name: str) -> str:
         "\n"
         '    case "$state" in\n'
         "        command)\n"
+        f"            groups_and_top=($({groups_and_top_cmd}))\n"
         f"            _describe -t commands '{prog_name} commands' commands\n"
+        "            compadd -a groups_and_top\n"
         "            ;;\n"
         "        args)\n"
         '            case "${words[1]}" in\n'
@@ -83,6 +143,11 @@ def _generate_zsh_completion(prog_name: str) -> str:
         "                    local modules\n"
         f"                    modules=($({module_list_cmd}))\n"
         "                    compadd -a modules\n"
+        "                    ;;\n"
+        "                *)\n"
+        "                    local -a group_cmds\n"
+        f'                    group_cmds=($(export _APCORE_GRP="${{words[1]}}"; {group_cmds_cmd}))\n'
+        "                    compadd -a group_cmds\n"
         "                    ;;\n"
         "            esac\n"
         "            ;;\n"
@@ -100,8 +165,40 @@ def _generate_fish_completion(prog_name: str) -> str:
         ' | python3 -c \\"import sys,json;'
         "[print(m['id']) for m in json.load(sys.stdin)]\\\" 2>/dev/null"
     )
+    # Fish command to extract group names and top-level module IDs
+    groups_and_top_cmd = (
+        f"{quoted} list --format json 2>/dev/null"
+        ' | python3 -c \\"'
+        "import sys,json\\n"
+        "ids=[m['id'] for m in json.load(sys.stdin)]\\n"
+        "groups=set()\\n"
+        "top=[]\\n"
+        "for i in ids:\\n"
+        "    if '.' in i: groups.add(i.split('.')[0])\\n"
+        "    else: top.append(i)\\n"
+        "print('\\\\n'.join(sorted(groups)+sorted(top)))\\n"
+        '\\" 2>/dev/null'
+    )
+    # Fish command to list sub-commands for a given group
+    # Uses $argv[1] as the group name passed by the function
+    group_cmds_fish_fn = (
+        f"function __apcore_group_cmds\n"
+        f"    set -l grp $argv[1]\n"
+        f"    {quoted} list --format json 2>/dev/null"
+        ' | python3 -c \\"'
+        "import sys,json,os\\n"
+        "g=os.environ['_APCORE_GRP']\\n"
+        "ids=[m['id'] for m in json.load(sys.stdin)]\\n"
+        "for i in ids:\\n"
+        "    if '.' in i and i.split('.')[0]==g: print(i.split('.',1)[1])\\n"
+        '\\" 2>/dev/null\n'
+        "end\n"
+    )
     return (
         f"# Fish completions for {prog_name}\n"
+        f"\n"
+        f"{group_cmds_fish_fn}"
+        f"\n"
         f'complete -c {quoted} -n "__fish_use_subcommand"'
         ' -a exec -d "Execute an apcore module"\n'
         f'complete -c {quoted} -n "__fish_use_subcommand"'
@@ -112,6 +209,8 @@ def _generate_fish_completion(prog_name: str) -> str:
         ' -a completion -d "Generate shell completion script"\n'
         f'complete -c {quoted} -n "__fish_use_subcommand"'
         ' -a man -d "Generate man page"\n'
+        f'complete -c {quoted} -n "__fish_use_subcommand"'
+        f' -a "({groups_and_top_cmd})" -d "Module group or command"\n'
         "\n"
         f'complete -c {quoted} -n "__fish_seen_subcommand_from exec"'
         f' -a "({module_list_cmd})"\n'

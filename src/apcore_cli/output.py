@@ -12,6 +12,8 @@ from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.table import Table
 
+from apcore_cli.display_helpers import get_cli_display_fields as _get_cli_fields
+
 if TYPE_CHECKING:
     from apcore.registry.types import ModuleDescriptor
 
@@ -52,21 +54,20 @@ def format_module_list(
         table.add_column("Tags")
 
         for m in modules:
-            desc = _truncate(m.description, 80)
-            tags = ", ".join(m.tags) if hasattr(m, "tags") and m.tags else ""
-            mid = m.canonical_id if hasattr(m, "canonical_id") else m.module_id
-            table.add_row(mid, desc, tags)
+            display_name, desc, tags_val = _get_cli_fields(m)
+            tags = ", ".join(tags_val) if tags_val else ""
+            table.add_row(display_name, _truncate(desc, 80), tags)
 
         Console().print(table)
     elif format == "json":
         result = []
         for m in modules:
-            mid = m.canonical_id if hasattr(m, "canonical_id") else m.module_id
+            mid, desc, tags_val = _get_cli_fields(m)
             result.append(
                 {
                     "id": mid,
-                    "description": m.description,
-                    "tags": m.tags if hasattr(m, "tags") else [],
+                    "description": desc,
+                    "tags": tags_val,
                 }
             )
         click.echo(json.dumps(result, indent=2))
@@ -104,12 +105,22 @@ def _annotations_to_dict(annotations: Any) -> dict | None:
 
 def format_module_detail(module_def: ModuleDescriptor, format: str) -> None:
     """Format and print full module metadata."""
+    from apcore_cli.display_helpers import get_display
+
     mid = module_def.canonical_id if hasattr(module_def, "canonical_id") else module_def.module_id
+
+    # Resolve display overlay fields (§5.13)
+    display = get_display(module_def)
+    cli_display = display.get("cli") or {}
+    display_description: str = cli_display.get("description") or module_def.description
+    display_guidance: str | None = cli_display.get("guidance") or display.get("guidance")
 
     if format == "table":
         console = Console()
         console.print(Panel(f"Module: {mid}"))
-        click.echo(f"\nDescription:\n  {module_def.description}\n")
+        click.echo(f"\nDescription:\n  {display_description}\n")
+        if display_guidance:
+            click.echo(f"Guidance:\n{display_guidance}\n")
 
         if hasattr(module_def, "input_schema") and module_def.input_schema:
             click.echo("\nInput Schema:")
@@ -148,8 +159,10 @@ def format_module_detail(module_def: ModuleDescriptor, format: str) -> None:
     elif format == "json":
         result: dict[str, Any] = {
             "id": mid,
-            "description": module_def.description,
+            "description": display_description,
         }
+        if display_guidance:
+            result["guidance"] = display_guidance
         if hasattr(module_def, "input_schema") and module_def.input_schema:
             result["input_schema"] = module_def.input_schema
         if hasattr(module_def, "output_schema") and module_def.output_schema:
@@ -176,6 +189,55 @@ def format_module_detail(module_def: ModuleDescriptor, format: str) -> None:
             pass
 
         click.echo(json.dumps(result, indent=2))
+
+
+def format_grouped_module_list(
+    grouped: dict[str | None, list[tuple[str, str, list[str]]]],
+    filter_tags: tuple[str, ...] = (),
+) -> None:
+    """Format and print modules grouped by namespace.
+
+    Parameters
+    ----------
+    grouped:
+        Mapping of group name (or ``None`` for ungrouped) to a list of
+        ``(command_name, description, tags)`` tuples.
+    filter_tags:
+        Tags used for filtering (shown in the empty-state message).
+    """
+    console = Console()
+
+    # Separate top-level (ungrouped) modules
+    top = grouped.pop(None, [])
+
+    all_empty = not top and not grouped
+    if all_empty and filter_tags:
+        click.echo(f"No modules found matching tags: {', '.join(filter_tags)}.")
+        return
+    if all_empty:
+        click.echo("No modules found.")
+        return
+
+    # Named groups
+    for group_name in sorted(grouped.keys()):
+        members = grouped[group_name]
+        table = Table(title=f"{group_name}")
+        table.add_column("Command")
+        table.add_column("Description")
+        table.add_column("Tags")
+        for cmd, desc, tags in sorted(members, key=lambda x: x[0]):
+            table.add_row(cmd, _truncate(desc, 80), ", ".join(tags) if tags else "")
+        console.print(table)
+
+    # Top-level / ungrouped
+    if top:
+        table = Table(title="Other")
+        table.add_column("Command")
+        table.add_column("Description")
+        table.add_column("Tags")
+        for cmd, desc, tags in sorted(top, key=lambda x: x[0]):
+            table.add_row(cmd, _truncate(desc, 80), ", ".join(tags) if tags else "")
+        console.print(table)
 
 
 def format_exec_result(result: Any, format: str | None = None) -> None:
