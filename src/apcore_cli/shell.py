@@ -59,7 +59,7 @@ def _generate_bash_completion(prog_name: str) -> str:
         "\n"
         "    if [[ ${COMP_CWORD} -eq 1 ]]; then\n"
         f"        local all_ids=$({groups_and_top_cmd})\n"
-        '        local builtins="exec list describe completion man"\n'
+        '        local builtins="completion describe exec init list man"\n'
         '        COMPREPLY=( $(compgen -W "${builtins} ${all_ids}" -- ${cur}) )\n'
         "        return 0\n"
         "    fi\n"
@@ -124,6 +124,7 @@ def _generate_zsh_completion(prog_name: str) -> str:
         "        'list:List available modules'\n"
         "        'describe:Show module metadata and schema'\n"
         "        'completion:Generate shell completion script'\n"
+        "        'init:Scaffolding commands'\n"
         "        'man:Generate man page'\n"
         "    )\n"
         "\n"
@@ -207,6 +208,8 @@ def _generate_fish_completion(prog_name: str) -> str:
         ' -a describe -d "Show module metadata and schema"\n'
         f'complete -c {quoted} -n "__fish_use_subcommand"'
         ' -a completion -d "Generate shell completion script"\n'
+        f'complete -c {quoted} -n "__fish_use_subcommand"'
+        ' -a init -d "Scaffolding commands"\n'
         f'complete -c {quoted} -n "__fish_use_subcommand"'
         ' -a man -d "Generate man page"\n'
         f'complete -c {quoted} -n "__fish_use_subcommand"'
@@ -304,6 +307,9 @@ def _generate_man_page(command_name: str, command: click.Command | None, prog_na
         "Global apcore logging verbosity. One of: DEBUG, INFO, WARNING, ERROR. "
         "Used as fallback when \\fBAPCORE_CLI_LOGGING_LEVEL\\fR is not set. Default: WARNING."
     )
+    sections.append(".TP")
+    sections.append("\\fBAPCORE_AUTH_API_KEY\\fR")
+    sections.append("API key for authenticating with the apcore registry.")
 
     sections.append(".SH EXIT CODES")
     exit_codes = [
@@ -380,7 +386,7 @@ def register_shell_commands(cli: click.Group, prog_name: str = "apcore-cli") -> 
         parent_group = parent.command
         cmd = parent_group.commands.get(command) if isinstance(parent_group, click.Group) else None
 
-        known_builtins = {"list", "describe", "completion", "man"}
+        known_builtins = {"completion", "describe", "exec", "init", "list", "man"}
         if cmd is None and command not in known_builtins:
             click.echo(f"Error: Unknown command '{command}'.", err=True)
             sys.exit(2)

@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("apcore_cli.cli")
 
-BUILTIN_COMMANDS = ["exec", "list", "describe", "completion", "man"]
+BUILTIN_COMMANDS = ["completion", "describe", "exec", "init", "list", "man"]
 
 # Module-level audit logger, set during CLI init
 _audit_logger: AuditLogger | None = None

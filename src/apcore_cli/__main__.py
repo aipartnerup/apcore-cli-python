@@ -45,10 +45,16 @@ def _extract_commands_dir(argv: list[str] | None = None) -> str | None:
     return _extract_argv_option(argv, "--commands-dir")
 
 
+def _extract_binding_path(argv: list[str] | None = None) -> str | None:
+    """Extract --binding value from argv before Click parses it."""
+    return _extract_argv_option(argv, "--binding")
+
+
 def create_cli(
     extensions_dir: str | None = None,
     prog_name: str | None = None,
     commands_dir: str | None = None,
+    binding_path: str | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -62,6 +68,9 @@ def create_cli(
         commands_dir: Directory containing convention-based modules.
                       When set, scans for plain-function modules and registers
                       them via ConventionScanner (requires apcore-toolkit).
+        binding_path: Path to binding.yaml file or directory for display resolution.
+                      When set, applies DisplayResolver to convention-scanned modules
+                      (requires apcore-toolkit).
     """
     if prog_name is None:
         prog_name = os.path.basename(sys.argv[0]) or "apcore-cli"
@@ -138,8 +147,17 @@ def create_cli(
                 conv_scanner = ConventionScanner()
                 conv_modules = conv_scanner.scan(commands_dir)
                 if conv_modules:
-                    writer = RegistryWriter(registry=registry)
-                    writer.write(conv_modules)
+                    if binding_path is not None:
+                        try:
+                            from apcore_toolkit import DisplayResolver
+
+                            display_resolver = DisplayResolver()
+                            conv_modules = display_resolver.resolve(conv_modules, binding_path=binding_path)
+                            logger.info("DisplayResolver: applied binding from %s", binding_path)
+                        except ImportError:
+                            logger.warning("DisplayResolver not available in apcore-toolkit")
+                    writer = RegistryWriter()
+                    writer.write(conv_modules, registry)
                     logger.info("Convention scanner: registered %d modules from %s", len(conv_modules), commands_dir)
             except ImportError:
                 logger.warning("apcore-toolkit not installed — convention module scanning unavailable")
@@ -183,6 +201,12 @@ def create_cli(
         help="Path to convention-based commands directory.",
     )
     @click.option(
+        "--binding",
+        "binding_opt",
+        default=None,
+        help="Path to binding.yaml file or directory for display resolution.",
+    )
+    @click.option(
         "--log-level",
         default=None,
         type=click.Choice(["DEBUG", "INFO", "WARNING", "ERROR"], case_sensitive=False),
@@ -193,6 +217,7 @@ def create_cli(
         ctx: click.Context,
         extensions_dir_opt: str | None = None,
         commands_dir_opt: str | None = None,
+        binding_opt: str | None = None,
         log_level: str | None = None,
     ) -> None:
         if log_level is not None:
@@ -228,7 +253,8 @@ def main(prog_name: str | None = None) -> None:
     """
     ext_dir = _extract_extensions_dir()
     cmd_dir = _extract_commands_dir()
-    cli = create_cli(extensions_dir=ext_dir, prog_name=prog_name, commands_dir=cmd_dir)
+    bind_path = _extract_binding_path()
+    cli = create_cli(extensions_dir=ext_dir, prog_name=prog_name, commands_dir=cmd_dir, binding_path=bind_path)
     cli(standalone_mode=True)
 
 

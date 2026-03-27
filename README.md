@@ -48,7 +48,7 @@ Terminal adapter for apcore. Execute AI-Perceivable modules from the command lin
 pip install apcore-cli
 ```
 
-Requires Python 3.11+ and `apcore >= 0.13.0`.
+Requires Python 3.11+ and `apcore >= 0.14.0`.
 
 ## Quick Start
 

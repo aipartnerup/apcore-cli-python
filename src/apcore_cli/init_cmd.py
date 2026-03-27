@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import click
@@ -59,6 +60,10 @@ def register_init_command(cli: click.Group) -> None:
 
         MODULE_ID is the module identifier (e.g., ops.deploy, user.create).
         """
+        if output_dir is not None and ".." in Path(output_dir).parts:
+            click.echo("Error: Output directory must not contain '..' path components.", err=True)
+            sys.exit(2)
+
         # Parse module_id into parts
         parts = module_id.rsplit(".", 1)
         if len(parts) == 2:
