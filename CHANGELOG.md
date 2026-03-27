@@ -5,6 +5,26 @@ All notable changes to apcore-cli (Python SDK) will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-03-27
+
+### Added
+
+- **DisplayResolver integration** — `__main__.py` integrates `DisplayResolver` from `apcore-toolkit` (optional) when `--binding` option is provided; gracefully skipped when not installed.
+- **`init` to `BUILTIN_COMMANDS`** — `init` subcommand is now registered in the builtin commands set.
+- **`APCORE_AUTH_API_KEY` to man page** — environment variable documented in generated roff man page.
+- **Grouped shell completion with `_APCORE_GRP`** — bash/zsh/fish completion scripts now support two-level group/command completion via the `_APCORE_GRP` environment variable (`shell.py`).
+- **Path traversal validation for `--dir` in `init` command** — rejects paths containing `..` segments to prevent directory escape (`init_cmd.py`).
+
+### Fixed
+
+- **`RegistryWriter` API call** — constructor now called without parameters; fixes `TypeError` introduced by upstream API change.
+
+### Changed
+
+- `apcore` dependency bumped to `>=0.14.0`.
+
+---
+
 ## [0.3.0] - 2026-03-23
 
 ### Added
