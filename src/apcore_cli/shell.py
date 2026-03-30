@@ -501,13 +501,17 @@ def configure_man_help(
     Usage:
         configure_man_help(cli, "reach", "0.2.0", "ReachForge", "https://reachforge.dev/docs")
     """
-    # Add --man as a hidden Click option
+    # Add --man as a hidden Click option.
+    # expose_value=False: Click must not pass this to the group callback,
+    # which has no 'man' parameter. The value is read directly from sys.argv
+    # via the pre-parse below.
     cli.params.append(
         click.Option(
             ["--man"],
             is_flag=True,
             default=False,
             hidden=True,
+            expose_value=False,
             help="Output man page in roff format (use with --help).",
         )
     )
