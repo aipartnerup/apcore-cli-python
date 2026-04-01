@@ -16,6 +16,15 @@ class ConfigResolver:
     CLI flag > Environment variable > Config file > Default.
     """
 
+    # Namespace key -> legacy key mapping for backward compatibility
+    _NAMESPACE_TO_LEGACY: dict[str, str] = {
+        "apcore-cli.stdin_buffer_limit": "cli.stdin_buffer_limit",
+        "apcore-cli.auto_approve": "cli.auto_approve",
+        "apcore-cli.help_text_max_length": "cli.help_text_max_length",
+        "apcore-cli.logging_level": "logging.level",
+    }
+    _LEGACY_TO_NAMESPACE: dict[str, str] = {v: k for k, v in _NAMESPACE_TO_LEGACY.items()}
+
     DEFAULTS: dict[str, Any] = {
         "extensions.root": "./extensions",
         "logging.level": "WARNING",
@@ -23,6 +32,11 @@ class ConfigResolver:
         "cli.stdin_buffer_limit": 10_485_760,  # 10 MB
         "cli.auto_approve": False,
         "cli.help_text_max_length": 1000,
+        # Namespace-mode aliases (apcore >= 0.15.0 Config Bus)
+        "apcore-cli.stdin_buffer_limit": 10_485_760,
+        "apcore-cli.auto_approve": False,
+        "apcore-cli.help_text_max_length": 1000,
+        "apcore-cli.logging_level": "WARNING",
     }
 
     def __init__(
@@ -53,9 +67,13 @@ class ConfigResolver:
             if env_value is not None and env_value != "":
                 return env_value
 
-        # Tier 3: Config file
-        if self._config_file is not None and key in self._config_file:
-            return self._config_file[key]
+        # Tier 3: Config file (try both namespace and legacy keys)
+        if self._config_file is not None:
+            if key in self._config_file:
+                return self._config_file[key]
+            alt_key = self._NAMESPACE_TO_LEGACY.get(key) or self._LEGACY_TO_NAMESPACE.get(key)
+            if alt_key and alt_key in self._config_file:
+                return self._config_file[alt_key]
 
         # Tier 4: Default
         return self.DEFAULTS.get(key)

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shlex
+import subprocess
 import sys
 from datetime import date
 
@@ -480,6 +482,48 @@ def build_program_man_page(
     return "\n".join(s)
 
 
+def _render_man_page(roff: str) -> None:
+    """Render a roff man page to stdout.
+
+    When stdout is a TTY, attempts to render through mandoc or groff and
+    pipe through a pager for formatted display. When stdout is not a TTY
+    (piped or redirected), outputs raw roff for file redirection.
+    """
+    roff_bytes = roff.encode()
+    if not sys.stdout.isatty():
+        sys.stdout.write(roff)
+        return
+
+    # Try mandoc first (macOS/BSD), then groff
+    renderers = [
+        ["mandoc", "-a"],
+        ["groff", "-man", "-Tutf8"],
+    ]
+    for cmd in renderers:
+        try:
+            result = subprocess.run(
+                cmd,
+                input=roff_bytes,
+                capture_output=True,
+            )
+        except FileNotFoundError:
+            continue
+        if result.returncode == 0 and result.stdout:
+            pager = os.environ.get("PAGER", "less")
+            try:
+                subprocess.run(
+                    [pager, "-R"],
+                    input=result.stdout,
+                )
+                return
+            except FileNotFoundError:
+                # Pager not found — fall through to raw output
+                break
+
+    # Fallback: raw roff output
+    sys.stdout.write(roff)
+
+
 def configure_man_help(
     cli: click.Group,
     prog_name: str,
@@ -520,7 +564,7 @@ def configure_man_help(
     args = sys.argv[1:]
     if "--man" in args and ("--help" in args or "-h" in args):
         roff = build_program_man_page(cli, prog_name, version, description, docs_url)
-        click.echo(roff)
+        _render_man_page(roff)
         sys.exit(0)
 
 

@@ -13,7 +13,7 @@ from apcore_cli.cli import GroupedModuleGroup, set_audit_logger, set_verbose_hel
 from apcore_cli.config import ConfigResolver
 from apcore_cli.discovery import register_discovery_commands
 from apcore_cli.security.audit import AuditLogger
-from apcore_cli.shell import register_shell_commands
+from apcore_cli.shell import configure_man_help, register_shell_commands
 
 logger = logging.getLogger("apcore_cli")
 
@@ -255,6 +255,9 @@ def create_cli(
 
     # Register shell integration commands
     register_shell_commands(cli, prog_name=prog_name)
+
+    # Register --help --man support
+    configure_man_help(cli, prog_name, __version__)
 
     # Register init scaffolding command
     from apcore_cli.init_cmd import register_init_command

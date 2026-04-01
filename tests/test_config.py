@@ -140,3 +140,47 @@ class TestConfigFileLoading:
         resolver = ConfigResolver(config_path="/nonexistent/apcore.yaml")
         result = resolver._flatten_dict({"a": {"b": {"c": "deep_value"}}})
         assert result == {"a.b.c": "deep_value"}
+
+
+class TestNamespaceAwareConfigResolution:
+    """Config Bus namespace ↔ legacy key fallback (apcore >= 0.15.0)."""
+
+    def test_defaults_contain_namespace_keys(self):
+        resolver = ConfigResolver()
+        for key in [
+            "apcore-cli.stdin_buffer_limit",
+            "apcore-cli.auto_approve",
+            "apcore-cli.help_text_max_length",
+            "apcore-cli.logging_level",
+        ]:
+            assert key in resolver.DEFAULTS, f"Missing namespace default: {key}"
+
+    def test_resolve_namespace_key_from_legacy_config_file(self, tmp_path, clean_env):
+        """Querying 'apcore-cli.stdin_buffer_limit' finds 'cli.stdin_buffer_limit' in file."""
+        config_file = tmp_path / "apcore.yaml"
+        config_file.write_text("cli:\n  stdin_buffer_limit: 5242880\n")
+        resolver = ConfigResolver(config_path=str(config_file))
+        result = resolver.resolve("apcore-cli.stdin_buffer_limit")
+        assert result == 5242880
+
+    def test_resolve_legacy_key_from_namespace_config_file(self, tmp_path, clean_env):
+        """Querying 'cli.auto_approve' finds 'apcore-cli.auto_approve' in file."""
+        config_file = tmp_path / "apcore.yaml"
+        config_file.write_text("apcore-cli:\n  auto_approve: true\n")
+        resolver = ConfigResolver(config_path=str(config_file))
+        result = resolver.resolve("cli.auto_approve")
+        assert result is True
+
+    def test_direct_key_takes_precedence_over_alternate(self, tmp_path, clean_env):
+        """When both keys exist in file, the directly-queried key wins."""
+        config_file = tmp_path / "apcore.yaml"
+        config_file.write_text("cli:\n  help_text_max_length: 500\n" "apcore-cli:\n  help_text_max_length: 2000\n")
+        resolver = ConfigResolver(config_path=str(config_file))
+        assert resolver.resolve("cli.help_text_max_length") == 500
+        assert resolver.resolve("apcore-cli.help_text_max_length") == 2000
+
+    def test_namespace_mapping_is_bidirectional(self):
+        resolver = ConfigResolver()
+        assert len(resolver._NAMESPACE_TO_LEGACY) == len(resolver._LEGACY_TO_NAMESPACE)
+        for ns_key, legacy_key in resolver._NAMESPACE_TO_LEGACY.items():
+            assert resolver._LEGACY_TO_NAMESPACE[legacy_key] == ns_key

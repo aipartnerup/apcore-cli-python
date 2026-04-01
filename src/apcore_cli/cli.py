@@ -343,6 +343,13 @@ class GroupedModuleGroup(LazyModuleGroup):
                 with formatter.section("Groups"):
                     formatter.write_dl(group_records)
 
+        # Footer hints for discoverability
+        formatter.write_paragraph()
+        formatter.write(
+            "Use --help --verbose to show all options (including built-in apcore options).\n"
+            "Use --help --man to display a formatted man page."
+        )
+
 
 # Error code mapping from apcore error codes to CLI exit codes
 _ERROR_CODE_MAP = {
@@ -359,6 +366,13 @@ _ERROR_CODE_MAP = {
     "MODULE_EXECUTE_ERROR": 1,
     "MODULE_TIMEOUT": 1,
     "ACL_DENIED": 77,
+    # Config Bus errors (apcore >= 0.15.0)
+    "CONFIG_NAMESPACE_RESERVED": 78,
+    "CONFIG_NAMESPACE_DUPLICATE": 78,
+    "CONFIG_ENV_PREFIX_CONFLICT": 78,
+    "CONFIG_MOUNT_ERROR": 66,
+    "CONFIG_BIND_ERROR": 65,
+    "ERROR_FORMATTER_DUPLICATE": 70,
 }
 
 
