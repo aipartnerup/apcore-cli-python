@@ -310,3 +310,40 @@ class TestConfigResolverWiring:
         with pytest.raises(SystemExit) as exc_info:
             create_cli(extensions_dir="/nonexistent")
         assert exc_info.value.code == 47
+
+
+class TestPrePopulatedRegistry:
+    """Tests for create_cli with pre-populated registry parameter."""
+
+    def test_create_cli_with_registry_skips_filesystem(self):
+        """When registry is provided, no filesystem discovery occurs."""
+        from apcore_cli.__main__ import create_cli
+
+        registry = MagicMock()
+        registry.list.return_value = ["test.module"]
+
+        executor = MagicMock()
+
+        # Should NOT exit 47 even though no extensions dir exists.
+        cli_group = create_cli(registry=registry, executor=executor, prog_name="test-cli")
+        assert cli_group is not None
+
+    def test_create_cli_with_registry_auto_builds_executor(self):
+        """When registry is provided without executor, an Executor is auto-built."""
+        from apcore_cli.__main__ import create_cli
+
+        registry = MagicMock()
+        registry.list.return_value = []
+
+        # Executor is omitted — should be auto-built from registry.
+        cli_group = create_cli(registry=registry, prog_name="test-cli")
+        assert cli_group is not None
+
+    def test_create_cli_executor_without_registry_raises(self):
+        """Passing executor without registry is a usage error."""
+        from apcore_cli.__main__ import create_cli
+
+        executor = MagicMock()
+
+        with pytest.raises(ValueError, match="executor requires registry"):
+            create_cli(executor=executor, prog_name="test-cli")

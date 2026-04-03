@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from typing import Any
 
 import click
 
@@ -61,6 +62,8 @@ def create_cli(
     prog_name: str | None = None,
     commands_dir: str | None = None,
     binding_path: str | None = None,
+    registry: Any | None = None,
+    executor: Any | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -77,6 +80,12 @@ def create_cli(
         binding_path: Path to binding.yaml file or directory for display resolution.
                       When set, applies DisplayResolver to convention-scanned modules
                       (requires apcore-toolkit).
+        registry: Pre-populated apcore Registry instance. When provided, skips
+                  filesystem discovery entirely. Useful for frameworks that register
+                  modules at runtime (e.g. apflow's bridge).
+        executor: Pre-built apcore Executor instance. When provided alongside
+                  registry, skips Executor construction. If omitted but registry
+                  is provided, an Executor is built from the given registry.
     """
     if prog_name is None:
         prog_name = os.path.basename(sys.argv[0]) or "apcore-cli"
@@ -121,64 +130,91 @@ def create_cli(
     except (TypeError, ValueError):
         help_text_max_length = 1000
 
-    ext_dir_missing = not os.path.exists(ext_dir)
-    ext_dir_unreadable = not ext_dir_missing and not os.access(ext_dir, os.R_OK)
+    if executor is not None and registry is None:
+        raise ValueError("executor requires registry — pass both or neither")
 
-    if ext_dir_missing:
-        click.echo(
-            f"Error: Extensions directory not found: '{ext_dir}'. Set APCORE_EXTENSIONS_ROOT or verify the path.",
-            err=True,
-        )
-        sys.exit(EXIT_CONFIG_NOT_FOUND)
-
-    if ext_dir_unreadable:
-        click.echo(
-            f"Error: Cannot read extensions directory: '{ext_dir}'. Check permissions.",
-            err=True,
-        )
-        sys.exit(EXIT_CONFIG_NOT_FOUND)
-
-    try:
-        from apcore import Executor, Registry
-
-        registry = Registry(extensions_dir=ext_dir)
+    if registry is not None:
+        # Pre-populated registry provided — skip filesystem discovery.
         try:
-            logger.debug("Loading extensions from %s", ext_dir)
-            count = registry.discover()
-            logger.info("Initialized apcore-cli with %d modules.", count)
+            from apcore import Executor as _Executor
+
+            if executor is None:
+                executor = _Executor(registry)
+            logger.info("Using pre-populated registry (%d modules).", len(list(registry.list())))
         except Exception as e:
-            logger.warning("Discovery failed: %s", e)
+            click.echo(
+                f"Error: Failed to initialize executor from provided registry: {e}",
+                err=True,
+            )
+            sys.exit(EXIT_CONFIG_NOT_FOUND)
+    else:
+        # Standard path: discover modules from filesystem.
+        ext_dir_missing = not os.path.exists(ext_dir)
+        ext_dir_unreadable = not ext_dir_missing and not os.access(ext_dir, os.R_OK)
 
-        # Convention module discovery
-        if commands_dir is not None:
+        if ext_dir_missing:
+            click.echo(
+                f"Error: Extensions directory not found: '{ext_dir}'. Set APCORE_EXTENSIONS_ROOT or verify the path.",
+                err=True,
+            )
+            sys.exit(EXIT_CONFIG_NOT_FOUND)
+
+        if ext_dir_unreadable:
+            click.echo(
+                f"Error: Cannot read extensions directory: '{ext_dir}'. Check permissions.",
+                err=True,
+            )
+            sys.exit(EXIT_CONFIG_NOT_FOUND)
+
+        try:
+            from apcore import Executor as _Executor
+            from apcore import Registry as _Registry
+
+            registry = _Registry(extensions_dir=ext_dir)
             try:
-                from apcore_toolkit import RegistryWriter
-                from apcore_toolkit.convention_scanner import ConventionScanner
-
-                conv_scanner = ConventionScanner()
-                conv_modules = conv_scanner.scan(commands_dir)
-                if conv_modules:
-                    if binding_path is not None:
-                        try:
-                            from apcore_toolkit import DisplayResolver
-
-                            display_resolver = DisplayResolver()
-                            conv_modules = display_resolver.resolve(conv_modules, binding_path=binding_path)
-                            logger.info("DisplayResolver: applied binding from %s", binding_path)
-                        except ImportError:
-                            logger.warning("DisplayResolver not available in apcore-toolkit")
-                    writer = RegistryWriter()
-                    writer.write(conv_modules, registry)
-                    logger.info("Convention scanner: registered %d modules from %s", len(conv_modules), commands_dir)
-            except ImportError:
-                logger.warning("apcore-toolkit not installed — convention module scanning unavailable")
+                logger.debug("Loading extensions from %s", ext_dir)
+                count = registry.discover()
+                logger.info("Initialized apcore-cli with %d modules.", count)
             except Exception as e:
-                logger.warning("Convention module scanning failed: %s", e)
+                logger.warning("Discovery failed: %s", e)
 
-        executor = Executor(registry)
-    except Exception as e:
-        click.echo(f"Error: Failed to initialize registry: {e}", err=True)
-        sys.exit(EXIT_CONFIG_NOT_FOUND)
+            # Convention module discovery
+            if commands_dir is not None:
+                try:
+                    from apcore_toolkit import RegistryWriter
+                    from apcore_toolkit.convention_scanner import ConventionScanner
+
+                    conv_scanner = ConventionScanner()
+                    conv_modules = conv_scanner.scan(commands_dir)
+                    if conv_modules:
+                        if binding_path is not None:
+                            try:
+                                from apcore_toolkit import DisplayResolver
+
+                                display_resolver = DisplayResolver()
+                                conv_modules = display_resolver.resolve(conv_modules, binding_path=binding_path)
+                                logger.info(
+                                    "DisplayResolver: applied binding from %s",
+                                    binding_path,
+                                )
+                            except ImportError:
+                                logger.warning("DisplayResolver not available in apcore-toolkit")
+                        writer = RegistryWriter()
+                        writer.write(conv_modules, registry)
+                        logger.info(
+                            "Convention scanner: registered %d modules from %s",
+                            len(conv_modules),
+                            commands_dir,
+                        )
+                except ImportError:
+                    logger.warning("apcore-toolkit not installed — convention module scanning unavailable")
+                except Exception as e:
+                    logger.warning("Convention module scanning failed: %s", e)
+
+            executor = _Executor(registry)
+        except Exception as e:
+            click.echo(f"Error: Failed to initialize registry: {e}", err=True)
+            sys.exit(EXIT_CONFIG_NOT_FOUND)
 
     # Initialize audit logger
     try:
@@ -277,7 +313,12 @@ def main(prog_name: str | None = None) -> None:
     ext_dir = _extract_extensions_dir()
     cmd_dir = _extract_commands_dir()
     bind_path = _extract_binding_path()
-    cli = create_cli(extensions_dir=ext_dir, prog_name=prog_name, commands_dir=cmd_dir, binding_path=bind_path)
+    cli = create_cli(
+        extensions_dir=ext_dir,
+        prog_name=prog_name,
+        commands_dir=cmd_dir,
+        binding_path=bind_path,
+    )
     cli(standalone_mode=True)
 
 

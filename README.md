@@ -92,12 +92,27 @@ All modules are auto-discovered. CLI flags are auto-generated from each module's
 ### Programmatic approach (Python API)
 
 ```python
-from apcore import Registry, Executor
-from apcore_cli.__main__ import create_cli
+from apcore_cli import create_cli
 
-# Build the CLI from your registry
+# Build the CLI from an extensions directory (auto-discovers modules)
 cli = create_cli(extensions_dir="./extensions")
 cli(standalone_mode=True)
+```
+
+#### Pre-populated registry
+
+Frameworks that register modules at runtime (e.g. apflow's bridge) can pass a pre-populated `Registry` directly, skipping filesystem discovery entirely:
+
+```python
+from apcore_cli import create_cli
+
+# registry is already populated by your framework
+cli = create_cli(registry=registry, prog_name="myapp")
+cli(standalone_mode=True)
+
+# Executor is auto-built from the registry if omitted.
+# You can also provide your own:
+cli = create_cli(registry=registry, executor=executor, prog_name="myapp")
 ```
 
 Or use the `LazyModuleGroup` directly with Click:

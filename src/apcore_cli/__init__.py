@@ -25,3 +25,8 @@ try:
     )
 except (ImportError, AttributeError):
     pass  # apcore < 0.15.0 or not installed
+
+# Public API re-exports
+from apcore_cli.__main__ import create_cli
+
+__all__ = ["__version__", "create_cli"]

@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.5.1] - 2026-04-03
+
+### Added
+- **Pre-populated registry support** — `create_cli()` accepts optional `registry` and `executor` parameters. When a pre-populated `Registry` is provided, filesystem discovery is skipped entirely. This enables frameworks that register modules at runtime (e.g. apflow's bridge) to generate CLI commands from their existing registry without requiring an extensions directory.
+- Passing `registry` alone auto-builds an `Executor`; passing `executor` without `registry` raises `ValueError`.
+
+---
+
 ## [0.4.1] - 2026-03-30
 
 ### Fixed
