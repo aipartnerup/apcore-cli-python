@@ -8,10 +8,15 @@ import shlex
 import subprocess
 import sys
 from datetime import date
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _get_version
 
 import click
 
-from apcore_cli import __version__
+try:
+    __version__ = _get_version("apcore-cli")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 
 def _make_function_name(prog_name: str) -> str:

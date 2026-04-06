@@ -5,16 +5,22 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _get_version
 from typing import Any
 
 import click
 
-from apcore_cli import __version__
 from apcore_cli.cli import GroupedModuleGroup, set_audit_logger, set_verbose_help
 from apcore_cli.config import ConfigResolver
 from apcore_cli.discovery import register_discovery_commands
 from apcore_cli.security.audit import AuditLogger
 from apcore_cli.shell import configure_man_help, register_shell_commands
+
+try:
+    __version__ = _get_version("apcore-cli")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
 logger = logging.getLogger("apcore_cli")
 
@@ -64,6 +70,7 @@ def create_cli(
     binding_path: str | None = None,
     registry: Any | None = None,
     executor: Any | None = None,
+    extra_commands: list[Any] | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -223,6 +230,22 @@ def create_cli(
     except Exception as e:
         logger.warning("Failed to initialize audit logger: %s", e)
 
+    # Wire CliApprovalHandler to Executor (FE-11 §3.5)
+    try:
+        import contextlib
+
+        from apcore_cli.approval import CliApprovalHandler
+
+        approval_timeout = 60
+        with contextlib.suppress(TypeError, ValueError):
+            approval_timeout = int(config.resolve("cli.approval_timeout", env_var="APCORE_CLI_APPROVAL_TIMEOUT") or 60)
+        handler = CliApprovalHandler(auto_approve=False, timeout=approval_timeout)
+        if hasattr(executor, "set_approval_handler"):
+            executor.set_approval_handler(handler)
+            logger.debug("CliApprovalHandler wired to Executor (timeout=%ds).", approval_timeout)
+    except Exception as e:
+        logger.debug("Could not wire CliApprovalHandler: %s", e)
+
     @click.group(
         cls=GroupedModuleGroup,
         registry=registry,
@@ -286,8 +309,23 @@ def create_cli(
         ctx.obj["extensions_dir"] = ext_dir
         ctx.obj["verbose_help"] = verbose_help
 
-    # Register discovery commands
+    # Register discovery commands (list, describe)
     register_discovery_commands(cli, registry)
+
+    # Register validate command (FE-11 §3.1)
+    from apcore_cli.discovery import register_validate_command
+
+    register_validate_command(cli, registry, executor)
+
+    # Register system management commands (FE-11 §3.2) — no-op if system modules unavailable
+    from apcore_cli.system_cmd import register_system_commands
+
+    register_system_commands(cli, executor)
+
+    # Register pipeline introspection command (FE-11 §3.8)
+    from apcore_cli.strategy import register_pipeline_command
+
+    register_pipeline_command(cli, executor)
 
     # Register shell integration commands
     register_shell_commands(cli, prog_name=prog_name)
@@ -299,6 +337,17 @@ def create_cli(
     from apcore_cli.init_cmd import register_init_command
 
     register_init_command(cli)
+
+    # Register extra commands from downstream projects (FE-11 §3.11)
+    if extra_commands:
+        from apcore_cli.cli import BUILTIN_COMMANDS
+
+        for cmd in extra_commands:
+            cmd_name = getattr(cmd, "name", None)
+            if cmd_name and cmd_name in BUILTIN_COMMANDS:
+                msg = f"Extra command '{cmd_name}' conflicts with built-in command."
+                raise ValueError(msg)
+            cli.add_command(cmd)
 
     return cli
 

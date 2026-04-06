@@ -174,7 +174,7 @@ class TestNamespaceAwareConfigResolution:
     def test_direct_key_takes_precedence_over_alternate(self, tmp_path, clean_env):
         """When both keys exist in file, the directly-queried key wins."""
         config_file = tmp_path / "apcore.yaml"
-        config_file.write_text("cli:\n  help_text_max_length: 500\n" "apcore-cli:\n  help_text_max_length: 2000\n")
+        config_file.write_text("cli:\n  help_text_max_length: 500\napcore-cli:\n  help_text_max_length: 2000\n")
         resolver = ConfigResolver(config_path=str(config_file))
         assert resolver.resolve("cli.help_text_max_length") == 500
         assert resolver.resolve("apcore-cli.help_text_max_length") == 2000

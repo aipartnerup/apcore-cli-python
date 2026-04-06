@@ -21,6 +21,9 @@ try:
             "auto_approve": False,
             "help_text_max_length": 1000,
             "logging_level": "WARNING",
+            "approval_timeout": 60,
+            "strategy": "standard",
+            "group_depth": 1,
         },
     )
 except (ImportError, AttributeError):

@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.6.0] - 2026-04-06
+
+### Changed
+
+- **Dependency bump**: requires `apcore >= 0.17.1` (was `>= 0.15.1`). Adds Execution Pipeline Strategy, Config Bus enhancements, Pipeline v2 declarative step metadata, `minimal` strategy preset.
+- **Schema parser**: Required schema properties now correctly enforced at CLI option level (was silently optional).
+- **Approval gate**: Fixed inverted logic in annotation type guard; `check_approval()` now accepts `timeout` parameter.
+
+### Added
+
+- **FE-11: Usability Enhancements** — 11 new capabilities:
+  - `--dry-run` preflight mode via `Executor.validate()`. Standalone `validate` command.
+  - System management commands: `health`, `usage`, `enable`, `disable`, `reload`, `config get`/`config set`. Graceful no-op when system modules unavailable.
+  - Enhanced error output: structured JSON with `ai_guidance`, `suggestion`, `retryable`, `user_fixable`, `details`. TTY hides machine-only fields.
+  - `--trace` pipeline visualization via `call_with_trace()`.
+  - `CliApprovalHandler` class implementing apcore `ApprovalHandler` protocol, wired to `Executor.set_approval_handler()`. `--approval-timeout`, `--approval-token` flags.
+  - `--stream` JSONL output via `Executor.stream()`.
+  - Enhanced `list` command: `--search`, `--status`, `--annotation`, `--sort`, `--reverse`, `--deprecated`, `--deps`.
+  - `--strategy` selection: `standard`, `internal`, `testing`, `performance`, `minimal`. `describe-pipeline` command.
+  - Output format extensions: `--format csv|yaml|jsonl`, `--fields` dot-path field selection.
+  - Multi-level grouping: `cli.group_depth` config key.
+  - Custom command extension: `create_cli(extra_commands=[...])` with collision detection.
+- New error code: `CONFIG_ENV_MAP_CONFLICT`.
+- New config keys: `cli.approval_timeout` (60), `cli.strategy` ("standard"), `cli.group_depth` (1).
+- New environment variables: `APCORE_CLI_APPROVAL_TIMEOUT`, `APCORE_CLI_STRATEGY`, `APCORE_CLI_GROUP_DEPTH`.
+- New files: `system_cmd.py`, `strategy.py`.
+
+---
+
 ## [0.5.1] - 2026-04-03
 
 ### Added

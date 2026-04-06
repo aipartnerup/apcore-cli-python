@@ -38,6 +38,7 @@ def format_module_list(
     modules: list[ModuleDescriptor],
     format: str,
     filter_tags: tuple[str, ...] = (),
+    show_deps: bool = False,
 ) -> None:
     """Format and print a list of modules."""
     if format == "table":
@@ -52,24 +53,32 @@ def format_module_list(
         table.add_column("ID")
         table.add_column("Description")
         table.add_column("Tags")
+        if show_deps:
+            table.add_column("Deps", justify="right")
 
         for m in modules:
             display_name, desc, tags_val = _get_cli_fields(m)
             tags = ", ".join(tags_val) if tags_val else ""
-            table.add_row(display_name, _truncate(desc, 80), tags)
+            if show_deps:
+                deps = getattr(m, "dependencies", None) or []
+                table.add_row(display_name, _truncate(desc, 80), tags, str(len(deps)))
+            else:
+                table.add_row(display_name, _truncate(desc, 80), tags)
 
         Console().print(table)
     elif format == "json":
         result = []
         for m in modules:
             mid, desc, tags_val = _get_cli_fields(m)
-            result.append(
-                {
-                    "id": mid,
-                    "description": desc,
-                    "tags": tags_val,
-                }
-            )
+            entry: dict[str, Any] = {
+                "id": mid,
+                "description": desc,
+                "tags": tags_val,
+            }
+            if show_deps:
+                deps = getattr(m, "dependencies", None) or []
+                entry["dependency_count"] = len(deps)
+            result.append(entry)
         click.echo(json.dumps(result, indent=2))
 
 
@@ -240,18 +249,69 @@ def format_grouped_module_list(
         console.print(table)
 
 
-def format_exec_result(result: Any, format: str | None = None) -> None:
+def format_exec_result(result: Any, format: str | None = None, fields: str | None = None) -> None:
     """Format and print module execution result.
 
     Uses ``resolve_format(format)`` for TTY-adaptive defaulting:
     - json (or non-TTY default): JSON-pretty-printed output.
-    - table: Rich table for dict results; falls back to JSON for lists,
-      plain string for scalars.
+    - table: Rich table for dict results; falls back to JSON for lists.
+    - csv: Comma-separated values (dict keys as header).
+    - yaml: YAML format.
+    - jsonl: JSON Lines (one object per line).
     """
     if result is None:
         return
+
+    # Apply field selection if specified
+    if fields and isinstance(result, dict):
+        selected = {}
+        for f in fields.split(","):
+            f = f.strip()
+            val = result
+            for part in f.split("."):
+                if isinstance(val, dict):
+                    val = val.get(part)
+                else:
+                    val = None
+                    break
+            selected[f] = val
+        result = selected
+
     effective = resolve_format(format)
-    if effective == "table" and isinstance(result, dict):
+
+    if effective == "csv":
+        import csv
+        import io
+
+        if isinstance(result, dict):
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=list(result.keys()))
+            writer.writeheader()
+            writer.writerow({k: str(v) for k, v in result.items()})
+            click.echo(buf.getvalue().rstrip())
+        elif isinstance(result, list) and result and isinstance(result[0], dict):
+            buf = io.StringIO()
+            writer = csv.DictWriter(buf, fieldnames=list(result[0].keys()))
+            writer.writeheader()
+            for row in result:
+                writer.writerow({k: str(v) for k, v in row.items()})
+            click.echo(buf.getvalue().rstrip())
+        else:
+            click.echo(json.dumps(result, default=str))
+    elif effective == "yaml":
+        try:
+            import yaml
+
+            click.echo(yaml.dump(result, default_flow_style=False, allow_unicode=True).rstrip())
+        except ImportError:
+            click.echo(json.dumps(result, indent=2, default=str))
+    elif effective == "jsonl":
+        if isinstance(result, list):
+            for item in result:
+                click.echo(json.dumps(item, default=str))
+        else:
+            click.echo(json.dumps(result, default=str))
+    elif effective == "table" and isinstance(result, dict):
         table = Table()
         table.add_column("Key")
         table.add_column("Value")

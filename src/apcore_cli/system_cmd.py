@@ -1,0 +1,318 @@
+"""System management commands — health, usage, enable, disable, reload, config (FE-11)."""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+from typing import Any
+
+import click
+
+from apcore_cli.approval import check_approval
+from apcore_cli.output import format_exec_result, resolve_format
+
+logger = logging.getLogger("apcore_cli.system_cmd")
+
+
+def _call_system_module(executor: Any, module_id: str, inputs: dict[str, Any]) -> Any:
+    """Call a system module and return the result."""
+    return executor.call(module_id, inputs)
+
+
+def _check_system_approval(executor: Any, module_id: str, auto_approve: bool) -> None:
+    """Check approval for system commands that have requires_approval=True."""
+    try:
+        module_def = None
+        if hasattr(executor, "_registry"):
+            module_def = executor._registry.get_definition(module_id)
+        if module_def is not None:
+            check_approval(module_def, auto_approve)
+    except SystemExit:
+        raise
+    except Exception:
+        # If we can't get module definition, skip approval check.
+        # The executor's built-in approval gate will still fire.
+        pass
+
+
+def _format_health_summary_tty(result: dict[str, Any]) -> None:
+    """Render health summary as a TTY table."""
+    summary = result.get("summary", {})
+    modules = result.get("modules", [])
+
+    if not modules:
+        click.echo("No modules found.")
+        return
+
+    click.echo(f"Health Overview ({summary.get('total_modules', len(modules))} modules)\n")
+    click.echo(f"  {'Module':<28} {'Status':<12} {'Error Rate':<12} Top Error")
+    click.echo(f"  {'-' * 28} {'-' * 12} {'-' * 12} {'-' * 20}")
+    for m in modules:
+        top = m.get("top_error")
+        top_str = f"{top['code']} ({top.get('count', '?')})" if top else "\u2014"
+        rate = f"{m.get('error_rate', 0) * 100:.1f}%"
+        click.echo(f"  {m['module_id']:<28} {m['status']:<12} {rate:<12} {top_str}")
+
+    parts = []
+    for key in ("healthy", "degraded", "error"):
+        count = summary.get(key, 0)
+        if count:
+            parts.append(f"{count} {key}")
+    click.echo(f"\nSummary: {', '.join(parts) or 'no data'}")
+
+
+def _format_health_module_tty(result: dict[str, Any]) -> None:
+    """Render single-module health detail."""
+    click.echo(f"Module: {result.get('module_id', '?')}")
+    click.echo(f"Status: {result.get('status', 'unknown')}")
+    total = result.get("total_calls", 0)
+    errors = result.get("error_count", 0)
+    rate = result.get("error_rate", 0)
+    avg = result.get("avg_latency_ms", 0)
+    p99 = result.get("p99_latency_ms", 0)
+    click.echo(f"Calls: {total:,} total | {errors:,} errors | {rate * 100:.1f}% error rate")
+    click.echo(f"Latency: {avg:.0f}ms avg | {p99:.0f}ms p99")
+
+    recent = result.get("recent_errors", [])
+    if recent:
+        click.echo(f"\nRecent Errors (top {len(recent)}):")
+        for e in recent:
+            count = e.get("count", "?")
+            last = e.get("last_occurred", "?")
+            click.echo(f"  {e.get('code', '?'):<24} x{count}  (last: {last})")
+
+
+def _format_usage_summary_tty(result: dict[str, Any]) -> None:
+    """Render usage summary as a TTY table."""
+    modules = result.get("modules", [])
+    period = result.get("period", "?")
+
+    if not modules:
+        click.echo(f"No usage data for period {period}.")
+        return
+
+    click.echo(f"Usage Summary (last {period})\n")
+    click.echo(f"  {'Module':<24} {'Calls':>8} {'Errors':>8} {'Avg Latency':>12} {'Trend':<10}")
+    click.echo(f"  {'-' * 24} {'-' * 8} {'-' * 8} {'-' * 12} {'-' * 10}")
+    for m in modules:
+        avg = f"{m.get('avg_latency_ms', 0):.0f}ms"
+        click.echo(
+            f"  {m['module_id']:<24} {m.get('call_count', 0):>8,} "
+            f"{m.get('error_count', 0):>8,} {avg:>12} {m.get('trend', ''):>10}"
+        )
+
+    total_calls = result.get("total_calls", sum(m.get("call_count", 0) for m in modules))
+    total_errors = result.get("total_errors", sum(m.get("error_count", 0) for m in modules))
+    click.echo(f"\nTotal: {total_calls:,} calls | {total_errors:,} errors")
+
+
+def register_system_commands(cli: click.Group, executor: Any) -> None:
+    """Register system management commands. No-op if system modules are not available."""
+    # Probe: check if system modules exist (no side effects — never call())
+    try:
+        if hasattr(executor, "validate"):
+            executor.validate("system.health.summary", {})
+        elif hasattr(executor, "_registry"):
+            # Fall back to registry lookup — pure read, no execution
+            if executor._registry.get_definition("system.health.summary") is None:
+                raise LookupError("system.health.summary not registered")
+        else:
+            logger.debug("Cannot probe for system modules; skipping registration.")
+            return
+    except Exception:
+        logger.debug("System modules not available; skipping system command registration.")
+        return
+
+    @cli.command("health")
+    @click.argument("module_id", required=False)
+    @click.option("--threshold", type=float, default=0.01, help="Error rate threshold (default: 0.01).")
+    @click.option("--all", "include_all", is_flag=True, default=False, help="Include healthy modules.")
+    @click.option("--errors", type=int, default=10, help="Max recent errors (module detail only).")
+    @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
+    def health_cmd(
+        module_id: str | None,
+        threshold: float,
+        include_all: bool,
+        errors: int,
+        output_format: str | None,
+    ) -> None:
+        """Show module health status. Optionally specify a module ID for details."""
+        fmt = resolve_format(output_format)
+        try:
+            if module_id:
+                result = _call_system_module(
+                    executor,
+                    "system.health.module",
+                    {"module_id": module_id, "error_limit": errors},
+                )
+                if fmt == "json" or not sys.stdout.isatty():
+                    click.echo(json.dumps(result, indent=2, default=str))
+                else:
+                    _format_health_module_tty(result)
+            else:
+                result = _call_system_module(
+                    executor,
+                    "system.health.summary",
+                    {"error_rate_threshold": threshold, "include_healthy": include_all},
+                )
+                if fmt == "json" or not sys.stdout.isatty():
+                    click.echo(json.dumps(result, indent=2, default=str))
+                else:
+                    _format_health_summary_tty(result)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    @cli.command("usage")
+    @click.argument("module_id", required=False)
+    @click.option("--period", default="24h", help="Time window: 1h, 24h, 7d, 30d (default: 24h).")
+    @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
+    def usage_cmd(module_id: str | None, period: str, output_format: str | None) -> None:
+        """Show module usage statistics. Optionally specify a module ID for details."""
+        fmt = resolve_format(output_format)
+        try:
+            if module_id:
+                result = _call_system_module(
+                    executor,
+                    "system.usage.module",
+                    {"module_id": module_id, "period": period},
+                )
+            else:
+                result = _call_system_module(
+                    executor,
+                    "system.usage.summary",
+                    {"period": period},
+                )
+            if fmt == "json" or not sys.stdout.isatty():
+                click.echo(json.dumps(result, indent=2, default=str))
+            elif module_id:
+                format_exec_result(result, fmt)
+            else:
+                _format_usage_summary_tty(result)
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    @cli.command("enable")
+    @click.argument("module_id")
+    @click.option("--reason", required=True, help="Reason for enabling (required for audit).")
+    @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
+    @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
+    def enable_cmd(module_id: str, reason: str, yes: bool, output_format: str | None) -> None:
+        """Enable a disabled module at runtime."""
+        _check_system_approval(executor, "system.control.toggle_feature", yes)
+        fmt = resolve_format(output_format)
+        try:
+            result = _call_system_module(
+                executor,
+                "system.control.toggle_feature",
+                {"module_id": module_id, "enabled": True, "reason": reason},
+            )
+            if fmt == "json" or not sys.stdout.isatty():
+                click.echo(json.dumps(result, indent=2, default=str))
+            else:
+                click.echo(f"Module '{module_id}' enabled.\n  Reason: {reason}")
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    @cli.command("disable")
+    @click.argument("module_id")
+    @click.option("--reason", required=True, help="Reason for disabling (required for audit).")
+    @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
+    @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
+    def disable_cmd(module_id: str, reason: str, yes: bool, output_format: str | None) -> None:
+        """Disable a module at runtime (calls are rejected until re-enabled)."""
+        _check_system_approval(executor, "system.control.toggle_feature", yes)
+        fmt = resolve_format(output_format)
+        try:
+            result = _call_system_module(
+                executor,
+                "system.control.toggle_feature",
+                {"module_id": module_id, "enabled": False, "reason": reason},
+            )
+            if fmt == "json" or not sys.stdout.isatty():
+                click.echo(json.dumps(result, indent=2, default=str))
+            else:
+                click.echo(f"Module '{module_id}' disabled.\n  Reason: {reason}")
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    @cli.command("reload")
+    @click.argument("module_id")
+    @click.option("--reason", required=True, help="Reason for reload (required for audit).")
+    @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
+    @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
+    def reload_cmd(module_id: str, reason: str, yes: bool, output_format: str | None) -> None:
+        """Hot-reload a module from disk."""
+        _check_system_approval(executor, "system.control.reload_module", yes)
+        fmt = resolve_format(output_format)
+        try:
+            result = _call_system_module(
+                executor,
+                "system.control.reload_module",
+                {"module_id": module_id, "reason": reason},
+            )
+            if fmt == "json" or not sys.stdout.isatty():
+                click.echo(json.dumps(result, indent=2, default=str))
+            else:
+                prev = result.get("previous_version", "?")
+                new = result.get("new_version", "?")
+                dur = result.get("reload_duration_ms", "?")
+                click.echo(f"Module '{module_id}' reloaded.")
+                click.echo(f"  Version: {prev} -> {new}")
+                click.echo(f"  Duration: {dur}ms")
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    @cli.group("config")
+    def config_group() -> None:
+        """Read or update runtime configuration."""
+
+    @config_group.command("get")
+    @click.argument("key")
+    def config_get_cmd(key: str) -> None:
+        """Read a configuration value by dot-path key."""
+        try:
+            from apcore import Config
+
+            value = Config().get(key)
+            click.echo(f"{key} = {value!r}")
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)
+
+    @config_group.command("set")
+    @click.argument("key")
+    @click.argument("value")
+    @click.option("--reason", required=True, help="Reason for config change (required for audit).")
+    @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
+    def config_set_cmd(key: str, value: str, reason: str, output_format: str | None) -> None:
+        """Update a runtime configuration value (requires approval)."""
+        fmt = resolve_format(output_format)
+        # Attempt to parse value as JSON for typed values
+        try:
+            parsed_value = json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            parsed_value = value
+
+        try:
+            result = _call_system_module(
+                executor,
+                "system.control.update_config",
+                {"key": key, "value": parsed_value, "reason": reason},
+            )
+            if fmt == "json" or not sys.stdout.isatty():
+                click.echo(json.dumps(result, indent=2, default=str))
+            else:
+                old = result.get("old_value", "?")
+                new = result.get("new_value", "?")
+                click.echo(f"Config updated: {key}")
+                click.echo(f"  {old!r} -> {new!r}")
+                click.echo(f"  Reason: {reason}")
+        except Exception as e:
+            click.echo(f"Error: {e}", err=True)
+            sys.exit(1)

@@ -1,14 +1,15 @@
-"""Discovery commands — list and describe (FE-04)."""
+"""Discovery commands — list, describe, validate (FE-04, FE-11)."""
 
 from __future__ import annotations
 
+import logging
 import re
 import sys
 from typing import Any
 
 import click
 
-from apcore_cli.cli import validate_module_id
+from apcore_cli.cli import format_preflight_result, validate_module_id
 from apcore_cli.display_helpers import get_cli_display_fields
 from apcore_cli.output import (
     format_grouped_module_list,
@@ -16,6 +17,8 @@ from apcore_cli.output import (
     format_module_list,
     resolve_format,
 )
+
+logger = logging.getLogger("apcore_cli.discovery")
 
 _TAG_PATTERN = re.compile(r"^[a-z][a-z0-9_-]*$")
 
@@ -47,11 +50,54 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
     @click.option(
         "--format",
         "output_format",
-        type=click.Choice(["table", "json"]),
+        type=click.Choice(["table", "json", "csv", "yaml", "jsonl"]),
         default=None,
         help="Output format. Default: table (TTY) or json (non-TTY).",
     )
-    def list_cmd(tag: tuple[str, ...], flat: bool, output_format: str | None) -> None:
+    @click.option("--search", "-s", default=None, help="Filter by substring match on ID and description.")
+    @click.option(
+        "--status",
+        type=click.Choice(["enabled", "disabled", "all"]),
+        default="enabled",
+        help="Filter by module status. Default: enabled.",
+    )
+    @click.option(
+        "--annotation",
+        "-a",
+        multiple=True,
+        type=click.Choice(
+            [
+                "destructive",
+                "requires-approval",
+                "readonly",
+                "streaming",
+                "cacheable",
+                "idempotent",
+            ]
+        ),
+        help="Filter by annotation flag (AND logic). Repeatable.",
+    )
+    @click.option(
+        "--sort",
+        type=click.Choice(["id", "calls", "errors", "latency"]),
+        default="id",
+        help="Sort order. Default: id.",
+    )
+    @click.option("--reverse", is_flag=True, default=False, help="Reverse sort order.")
+    @click.option("--deprecated", is_flag=True, default=False, help="Include deprecated modules.")
+    @click.option("--deps", is_flag=True, default=False, help="Show dependency count column.")
+    def list_cmd(
+        tag: tuple[str, ...],
+        flat: bool,
+        output_format: str | None,
+        search: str | None,
+        status: str,
+        annotation: tuple[str, ...],
+        sort: str,
+        reverse: bool,
+        deprecated: bool,
+        deps: bool,
+    ) -> None:
         """List available modules in the registry."""
         # Validate tag format
         for t in tag:
@@ -63,14 +109,58 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
             if mdef is not None:
                 modules.append(mdef)
 
+        # Tag filter
         if tag:
             filter_tags = set(tag)
             modules = [m for m in modules if filter_tags.issubset(set(getattr(m, "tags", [])))]
 
+        # Search filter (case-insensitive substring on id + description)
+        if search:
+            query = search.lower()
+            modules = [
+                m
+                for m in modules
+                if query in (getattr(m, "module_id", "") or "").lower()
+                or query in (getattr(m, "description", "") or "").lower()
+            ]
+
+        # Status filter
+        if status == "enabled":
+            modules = [m for m in modules if getattr(m, "enabled", None) is not False]
+        elif status == "disabled":
+            modules = [m for m in modules if getattr(m, "enabled", None) is False]
+        # "all": no filter
+
+        # Deprecated filter (excluded by default)
+        if not deprecated:
+            modules = [m for m in modules if getattr(m, "deprecated", False) is not True]
+
+        # Annotation filter (AND logic)
+        if annotation:
+            _ann_map = {
+                "destructive": "destructive",
+                "requires-approval": "requires_approval",
+                "readonly": "readonly",
+                "streaming": "streaming",
+                "cacheable": "cacheable",
+                "idempotent": "idempotent",
+            }
+            for ann_flag in annotation:
+                attr = _ann_map.get(ann_flag, ann_flag)
+                modules = [m for m in modules if getattr(getattr(m, "annotations", None), attr, False) is True]
+
+        # Sort
+        if sort in ("calls", "errors", "latency"):
+            logger.warning(
+                "Usage data not available; sorting by id. Sort by %s requires system.usage modules.",
+                sort,
+            )
+        modules.sort(key=lambda m: getattr(m, "module_id", ""), reverse=reverse)
+
         fmt = resolve_format(output_format)
 
-        if flat or fmt == "json":
-            format_module_list(modules, fmt, filter_tags=tag)
+        if flat or fmt in ("json", "csv", "yaml", "jsonl"):
+            format_module_list(modules, fmt, filter_tags=tag, show_deps=deps)
         else:
             # Build grouped dict for table display
             grouped: dict[str | None, list[tuple[str, str, list[str]]]] = {}
@@ -100,3 +190,32 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
 
         fmt = resolve_format(output_format)
         format_module_detail(module_def, fmt)
+
+
+def register_validate_command(cli: click.Group, registry: Any, executor: Any) -> None:
+    """Register the standalone validate command."""
+    from apcore_cli.cli import _first_failed_exit_code, collect_input
+
+    @cli.command("validate")
+    @click.argument("module_id")
+    @click.option("--input", "stdin_input", default=None, help="JSON input file or '-' for stdin.")
+    @click.option(
+        "--format",
+        "output_format",
+        type=click.Choice(["table", "json"]),
+        default=None,
+        help="Output format.",
+    )
+    def validate_cmd(module_id: str, stdin_input: str | None, output_format: str | None) -> None:
+        """Run preflight checks without executing a module."""
+        validate_module_id(module_id)
+
+        module_def = registry.get_definition(module_id)
+        if module_def is None:
+            click.echo(f"Error: Module '{module_id}' not found.", err=True)
+            sys.exit(44)
+
+        merged = collect_input(stdin_input, {}, False) if stdin_input else {}
+        preflight = executor.validate(module_id, merged)
+        format_preflight_result(preflight, output_format)
+        sys.exit(0 if preflight.valid else _first_failed_exit_code(preflight))

@@ -103,7 +103,7 @@ class TestListCommand:
     def test_list_cmd_invalid_format(self):
         cli = _make_cli_with_modules([])
         runner = CliRunner()
-        result = runner.invoke(cli, ["list", "--format", "yaml"])
+        result = runner.invoke(cli, ["list", "--format", "xml"])
         assert result.exit_code == 2
 
 

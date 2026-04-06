@@ -27,7 +27,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("apcore_cli.cli")
 
-BUILTIN_COMMANDS = ["completion", "describe", "exec", "init", "list", "man"]
+BUILTIN_COMMANDS = [
+    "completion",
+    "config",
+    "describe",
+    "describe-pipeline",
+    "disable",
+    "enable",
+    "exec",
+    "health",
+    "init",
+    "list",
+    "man",
+    "reload",
+    "usage",
+    "validate",
+]
 
 # Module-level audit logger, set during CLI init
 _audit_logger: AuditLogger | None = None
@@ -253,7 +268,9 @@ class GroupedModuleGroup(LazyModuleGroup):
         self._build_group_map()
         group_names = [g for g in self._group_map if g not in BUILTIN_COMMANDS]
         top_names = list(self._top_level_modules.keys())
-        return sorted(set(builtin + group_names + top_names))
+        # Include any commands added via add_command() (e.g., downstream project commands)
+        extra = [n for n in self.commands if n not in BUILTIN_COMMANDS]
+        return sorted(set(builtin + group_names + top_names + extra))
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         # Check built-in commands first
@@ -310,15 +327,21 @@ class GroupedModuleGroup(LazyModuleGroup):
             with formatter.section("Options"):
                 formatter.write_dl(opts)
 
-        # Commands section (builtins)
+        # Commands section (builtins + extra commands added via add_command)
+        builtin_names = set(BUILTIN_COMMANDS)
         builtin_records = []
-        for name in sorted(BUILTIN_COMMANDS):
-            cmd = self.commands.get(name)
+        extra_records = []
+        for name in sorted(self.commands):
+            cmd = self.commands[name]
             help_text = cmd.get_short_help_str() if cmd else ""
-            builtin_records.append((name, help_text))
-        if builtin_records:
+            if name in builtin_names:
+                builtin_records.append((name, help_text))
+            else:
+                extra_records.append((name, help_text))
+        all_cmd_records = extra_records + builtin_records
+        if all_cmd_records:
             with formatter.section("Commands"):
-                formatter.write_dl(builtin_records)
+                formatter.write_dl(all_cmd_records)
 
         # Modules section (top-level)
         if self._top_level_modules:
@@ -370,10 +393,117 @@ _ERROR_CODE_MAP = {
     "CONFIG_NAMESPACE_RESERVED": 78,
     "CONFIG_NAMESPACE_DUPLICATE": 78,
     "CONFIG_ENV_PREFIX_CONFLICT": 78,
+    "CONFIG_ENV_MAP_CONFLICT": 78,
     "CONFIG_MOUNT_ERROR": 66,
     "CONFIG_BIND_ERROR": 65,
     "ERROR_FORMATTER_DUPLICATE": 70,
 }
+
+
+def _first_failed_exit_code(result: Any) -> int:
+    """Return the exit code for the first failed check in a PreflightResult."""
+    _check_to_exit = {
+        "module_id": 2,
+        "module_lookup": 44,
+        "call_chain": 1,
+        "acl": 77,
+        "schema": 45,
+        "approval": 46,
+        "module_preflight": 1,
+    }
+    for check in getattr(result, "checks", []):
+        if not check.passed:
+            return _check_to_exit.get(check.check, 1)
+    return 1
+
+
+def format_preflight_result(result: Any, fmt: str | None = None) -> None:
+    """Format and print a PreflightResult to stdout."""
+    from apcore_cli.output import resolve_format
+
+    resolved = resolve_format(fmt)
+    if resolved == "json" or not sys.stdout.isatty():
+        payload: dict[str, Any] = {
+            "valid": result.valid,
+            "requires_approval": result.requires_approval,
+            "checks": [],
+        }
+        for c in result.checks:
+            entry: dict[str, Any] = {"check": c.check, "passed": c.passed}
+            if c.error is not None:
+                entry["error"] = c.error
+            if c.warnings:
+                entry["warnings"] = c.warnings
+            payload["checks"].append(entry)
+        click.echo(json.dumps(payload, indent=2, default=str))
+    else:
+        # TTY table format
+        for c in result.checks:
+            has_warnings = bool(getattr(c, "warnings", []))
+            if c.passed and has_warnings:
+                sym = "\u26a0"  # ⚠ passed with warnings
+            elif c.passed:
+                sym = "\u2713"  # ✓ passed
+            elif c.passed is False:
+                sym = "\u2717"  # ✗ failed
+            else:
+                sym = "\u25cb"  # ○ skipped
+            status = f"  {sym} {c.check:<20}"
+            if c.error:
+                detail = json.dumps(c.error, default=str) if isinstance(c.error, dict) else str(c.error)
+                status += f" {detail}"
+            elif c.passed and not has_warnings:
+                status += " OK"
+            elif not c.passed:
+                status += " Skipped"
+            click.echo(status)
+            for w in getattr(c, "warnings", []):
+                click.echo(f"    Warning: {w}")
+        errors = sum(1 for c in result.checks if not c.passed)
+        warnings = sum(len(getattr(c, "warnings", [])) for c in result.checks)
+        tag = "PASS" if result.valid else "FAIL"
+        click.echo(f"\nResult: {tag} ({errors} error(s), {warnings} warning(s))")
+
+
+def _emit_error_json(e: Exception, exit_code: int) -> None:
+    """Emit structured JSON error to stderr for AI agents."""
+    code = getattr(e, "code", None)
+    payload: dict[str, Any] = {
+        "error": True,
+        "code": code or "UNKNOWN",
+        "message": str(e),
+        "exit_code": exit_code,
+    }
+    for field in ("details", "suggestion", "ai_guidance", "retryable", "user_fixable"):
+        val = getattr(e, field, None)
+        if val is not None:
+            payload[field] = val
+    click.echo(json.dumps(payload, default=str), err=True)
+
+
+def _emit_error_tty(e: Exception, exit_code: int) -> None:
+    """Emit human-readable error to stderr with guidance fields."""
+    code = getattr(e, "code", None)
+    header = f"Error [{code}]: {e}" if code else f"Error: {e}"
+    click.echo(header, err=True)
+
+    details = getattr(e, "details", None)
+    if details and isinstance(details, dict):
+        click.echo("", err=True)
+        click.echo("  Details:", err=True)
+        for k, v in details.items():
+            click.echo(f"    {k}: {v}", err=True)
+
+    suggestion = getattr(e, "suggestion", None)
+    if suggestion:
+        click.echo(f"\n  Suggestion: {suggestion}", err=True)
+
+    retryable = getattr(e, "retryable", None)
+    if retryable is not None:
+        label = "Yes" if retryable else "No (same input will fail again)"
+        click.echo(f"  Retryable: {label}", err=True)
+
+    click.echo(f"\n  Exit code: {exit_code}", err=True)
 
 
 def _get_module_id(module_def: ModuleDescriptor) -> str:
@@ -439,7 +569,14 @@ def build_module_command(
         auto_approve = kwargs.pop("yes", False)
         large_input = kwargs.pop("large_input", False)
         output_format = kwargs.pop("format", None)
+        output_fields = kwargs.pop("fields", None)
         sandbox_flag = kwargs.pop("sandbox", False)
+        dry_run = kwargs.pop("dry_run", False)
+        trace_flag = kwargs.pop("trace", False)
+        stream_flag = kwargs.pop("stream", False)
+        strategy_name = kwargs.pop("strategy", None)
+        approval_timeout = kwargs.pop("approval_timeout", None) or 60
+        approval_token = kwargs.pop("approval_token", None)
 
         merged: dict[str, Any] = {}
         try:
@@ -448,6 +585,40 @@ def build_module_command(
 
             # 2. Reconvert enum values to original types
             merged = reconvert_enum_values(merged, schema_options)
+
+            # -- Dry-run: preflight validation only, no execution --
+            if dry_run:
+                preflight = executor.validate(module_id, merged)
+                format_preflight_result(preflight, output_format)
+                # --trace --dry-run: show which pipeline steps would run
+                if trace_flag and hasattr(preflight, "checks"):
+                    click.echo("\nPipeline preview (dry-run):", err=True)
+                    _pure_steps = {
+                        "context_creation",
+                        "call_chain_guard",
+                        "module_lookup",
+                        "acl_check",
+                        "input_validation",
+                    }
+                    _all_steps = [
+                        "context_creation",
+                        "call_chain_guard",
+                        "module_lookup",
+                        "acl_check",
+                        "approval_gate",
+                        "middleware_before",
+                        "input_validation",
+                        "execute",
+                        "output_validation",
+                        "middleware_after",
+                        "return_result",
+                    ]
+                    for s in _all_steps:
+                        if s in _pure_steps:
+                            click.echo(f"  \u2713 {s:<24} (pure — would execute)", err=True)
+                        else:
+                            click.echo(f"  \u25cb {s:<24} (impure — skipped in dry-run)", err=True)
+                sys.exit(0 if preflight.valid else _first_failed_exit_code(preflight))
 
             # 3. Validate against schema (if schema has properties)
             if resolved_schema.get("properties"):
@@ -460,13 +631,132 @@ def build_module_command(
                     )
                     sys.exit(45)
 
+            # -- Inject approval token if provided --
+            if approval_token:
+                merged["_approval_token"] = approval_token
+
             # 4. Check approval gate
-            check_approval(module_def, auto_approve)
+            check_approval(module_def, auto_approve, timeout=approval_timeout)
 
             # 5. Execute with timing (optionally sandboxed)
             audit_start = time.monotonic()
+
+            # -- Streaming execution --
+            if stream_flag:
+                import asyncio
+
+                # Streaming always outputs JSONL; --format table is ignored (spec §3.6.2)
+                if output_format == "table":
+                    logger.warning("Streaming mode always outputs JSONL; --format table is ignored.")
+
+                annotations = getattr(module_def, "annotations", None)
+                is_streaming = getattr(annotations, "streaming", False)
+                if not is_streaming:
+                    logger.warning(
+                        "Module '%s' does not declare streaming support. Falling back to standard execution.",
+                        module_id,
+                    )
+
+                if is_streaming and hasattr(executor, "stream"):
+
+                    async def _do_stream() -> None:
+                        chunks = 0
+                        async for chunk in executor.stream(module_id, merged):
+                            chunks += 1
+                            click.echo(json.dumps(chunk, default=str))
+                            sys.stdout.flush()
+                            if sys.stderr.isatty():
+                                click.echo(
+                                    f"\rStreaming {module_id}... ({chunks} chunks)",
+                                    err=True,
+                                    nl=False,
+                                )
+                        if sys.stderr.isatty():
+                            click.echo("", err=True)
+
+                    asyncio.run(_do_stream())
+                    duration_ms = int((time.monotonic() - audit_start) * 1000)
+                    if _audit_logger is not None:
+                        _audit_logger.log_execution(module_id, merged, "success", 0, duration_ms)
+                    return
+                # else: fall through to normal execution
+
+            # -- Traced execution --
+            if trace_flag and hasattr(executor, "call_with_trace"):
+                result, trace = executor.call_with_trace(
+                    module_id,
+                    merged,
+                    strategy=strategy_name,
+                )
+                duration_ms = int((time.monotonic() - audit_start) * 1000)
+
+                if _audit_logger is not None:
+                    _audit_logger.log_execution(module_id, merged, "success", 0, duration_ms)
+
+                # Print result
+                if output_format == "json" or not sys.stdout.isatty():
+                    # Merge _trace into JSON output
+                    trace_data = {
+                        "strategy": trace.strategy_name,
+                        "total_duration_ms": trace.total_duration_ms,
+                        "success": trace.success,
+                        "steps": [
+                            {
+                                "name": s.name,
+                                "duration_ms": s.duration_ms,
+                                "skipped": s.skipped,
+                                **({"skip_reason": s.skip_reason} if s.skipped else {}),
+                            }
+                            for s in trace.steps
+                        ],
+                    }
+                    if isinstance(result, dict):
+                        output = {**result, "_trace": trace_data}
+                    else:
+                        output = {"result": result, "_trace": trace_data}
+                    click.echo(json.dumps(output, indent=2, default=str))
+                else:
+                    format_exec_result(result, output_format, fields=output_fields)
+                    # Print trace to stderr
+                    step_count = len(trace.steps)
+                    click.echo(
+                        f"\nPipeline Trace (strategy: {trace.strategy_name}, "
+                        f"{step_count} steps, {trace.total_duration_ms:.1f}ms)",
+                        err=True,
+                    )
+                    for s in trace.steps:
+                        if s.skipped:
+                            sym = "\u25cb"
+                            dur = "\u2014"
+                            reason = f"  skipped ({s.skip_reason or 'n/a'})"
+                        else:
+                            sym = "\u2713"
+                            dur = f"{s.duration_ms:.1f}ms"
+                            reason = ""
+                        click.echo(f"  {sym} {s.name:<24} {dur:>8}{reason}", err=True)
+                return
+
+            # -- Standard execution (with optional strategy) --
             sandbox = Sandbox(enabled=sandbox_flag)
-            result = sandbox.execute(module_id, merged, executor)
+            if strategy_name and hasattr(executor, "call_with_trace"):
+                if sandbox_flag:
+                    # Sandbox mode: delegate to subprocess (strategy not available in sandbox)
+                    logger.warning("--sandbox ignores --strategy; sandboxed execution uses default strategy.")
+                    result = sandbox.execute(module_id, merged, executor)
+                else:
+                    # Strategy requires call_with_trace to pass strategy param
+                    result, _trace = executor.call_with_trace(
+                        module_id,
+                        merged,
+                        strategy=strategy_name,
+                    )
+                if strategy_name != "standard" and sys.stderr.isatty():
+                    click.echo(
+                        f"Warning: Using '{strategy_name}' strategy.",
+                        err=True,
+                    )
+            else:
+                result = sandbox.execute(module_id, merged, executor)
             duration_ms = int((time.monotonic() - audit_start) * 1000)
 
             # 6. Audit log (success)
@@ -474,7 +764,7 @@ def build_module_command(
                 _audit_logger.log_execution(module_id, merged, "success", 0, duration_ms)
 
             # 7. Format and print result
-            format_exec_result(result, output_format)
+            format_exec_result(result, output_format, fields=output_fields)
 
         except KeyboardInterrupt:
             click.echo("Execution cancelled.", err=True)
@@ -489,7 +779,10 @@ def build_module_command(
             if _audit_logger is not None:
                 _audit_logger.log_execution(module_id, merged, "error", exit_code, 0)
 
-            click.echo(f"Error: {e}", err=True)
+            if output_format == "json" or not sys.stderr.isatty():
+                _emit_error_json(e, exit_code)
+            else:
+                _emit_error_tty(e, exit_code)
             sys.exit(exit_code)
 
     # Build the command with schema-generated options + built-in options
@@ -537,9 +830,17 @@ def build_module_command(
     cmd.params.append(
         click.Option(
             ["--format"],
-            type=click.Choice(["json", "table"]),
+            type=click.Choice(["json", "table", "csv", "yaml", "jsonl"]),
             default=None,
-            help="Set output format: 'json' for machine-readable, 'table' for human-readable.",
+            help="Output format: json, table, csv, yaml, jsonl.",
+            hidden=_hide,
+        )
+    )
+    cmd.params.append(
+        click.Option(
+            ["--fields"],
+            default=None,
+            help="Comma-separated dot-paths to select from the result (e.g., 'status,data.count').",
             hidden=_hide,
         )
     )
@@ -553,9 +854,76 @@ def build_module_command(
             hidden=True,
         )
     )
+    cmd.params.append(
+        click.Option(
+            ["--dry-run"],
+            is_flag=True,
+            default=False,
+            help="Run preflight checks without executing the module. Shows validation results.",
+            hidden=_hide,
+        )
+    )
+    cmd.params.append(
+        click.Option(
+            ["--trace"],
+            is_flag=True,
+            default=False,
+            help="Show execution pipeline trace with per-step timing after the result.",
+            hidden=_hide,
+        )
+    )
+    cmd.params.append(
+        click.Option(
+            ["--stream"],
+            is_flag=True,
+            default=False,
+            help="Stream module output as JSONL (one JSON object per line, flushed immediately).",
+            hidden=_hide,
+        )
+    )
+    cmd.params.append(
+        click.Option(
+            ["--strategy"],
+            type=click.Choice(["standard", "internal", "testing", "performance", "minimal"]),
+            default=None,
+            help="Execution pipeline strategy: standard (default), internal, testing, performance.",
+            hidden=_hide,
+        )
+    )
+    cmd.params.append(
+        click.Option(
+            ["--approval-timeout"],
+            type=int,
+            default=None,
+            help="Override approval prompt timeout in seconds (default: 60).",
+            hidden=_hide,
+        )
+    )
+    cmd.params.append(
+        click.Option(
+            ["--approval-token"],
+            default=None,
+            help="Resume a pending approval with the given token (for async approval flows).",
+            hidden=_hide,
+        )
+    )
 
     # Guard: schema property names must not collide with built-in option names.
-    _reserved = {"input", "yes", "large_input", "format", "sandbox", "verbose"}
+    _reserved = {
+        "input",
+        "yes",
+        "large_input",
+        "format",
+        "fields",
+        "sandbox",
+        "verbose",
+        "dry_run",
+        "trace",
+        "stream",
+        "strategy",
+        "approval_timeout",
+        "approval_token",
+    }
     for opt in schema_options:
         if opt.name in _reserved:
             click.echo(

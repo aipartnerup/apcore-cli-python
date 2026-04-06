@@ -1,4 +1,4 @@
-"""Approval Gate — TTY-aware HITL approval (FE-03)."""
+"""Approval Gate — TTY-aware HITL approval (FE-03, FE-11 §3.5)."""
 
 from __future__ import annotations
 
@@ -26,11 +26,95 @@ def _get_annotation(annotations: Any, key: str, default: Any = None) -> Any:
     return getattr(annotations, key, default)
 
 
-def check_approval(module_def: Any, auto_approve: bool) -> None:
+# ---------------------------------------------------------------------------
+# CliApprovalHandler — implements apcore ApprovalHandler protocol (FE-11 §3.5)
+# ---------------------------------------------------------------------------
+
+
+class CliApprovalHandler:
+    """ApprovalHandler that prompts in TTY, auto-denies in non-TTY (unless bypassed).
+
+    Implements the apcore ApprovalHandler protocol:
+    - ``request_approval(request) -> ApprovalResult``
+    - ``check_approval(approval_id) -> ApprovalResult``
+
+    Pass to Executor via ``executor.set_approval_handler(handler)``.
+    """
+
+    def __init__(self, auto_approve: bool = False, timeout: int = 60) -> None:
+        self.auto_approve = auto_approve
+        self.timeout = max(1, min(timeout, 3600))
+
+    async def request_approval(self, request: Any) -> Any:
+        """Request approval for a module invocation.
+
+        Follows the apcore ApprovalRequest/ApprovalResult protocol.
+        Returns a dict with ``status``, ``approved_by``, ``reason`` fields
+        (duck-type compatible with ApprovalResult dataclass).
+        """
+        module_id = getattr(request, "module_id", "unknown")
+
+        # Bypass: auto_approve flag
+        if self.auto_approve:
+            logger.info("Approval bypassed via --yes flag for module '%s'.", module_id)
+            return {"status": "approved", "approved_by": "auto_approve"}
+
+        # Bypass: APCORE_CLI_AUTO_APPROVE env var
+        env_val = os.environ.get("APCORE_CLI_AUTO_APPROVE", "")
+        if env_val == "1":
+            logger.info("Approval bypassed via APCORE_CLI_AUTO_APPROVE for '%s'.", module_id)
+            return {"status": "approved", "approved_by": "env_auto_approve"}
+        if env_val != "" and env_val != "1":
+            logger.warning("APCORE_CLI_AUTO_APPROVE='%s', expected '1'. Ignoring.", env_val)
+
+        # Non-TTY: reject
+        if not sys.stdin.isatty():
+            return {
+                "status": "rejected",
+                "reason": "Non-interactive session without --yes",
+            }
+
+        # TTY prompt
+        annotations = getattr(request, "annotations", None) or {}
+        extra = getattr(annotations, "extra", {}) if not isinstance(annotations, dict) else annotations
+        message = extra.get("approval_message") or f"Module '{module_id}' requires approval to execute."
+
+        click.echo(message, err=True)
+        try:
+            approved = _tty_prompt(module_id, self.timeout)
+        except ApprovalTimeoutError:
+            return {"status": "timeout", "reason": f"Timed out after {self.timeout}s"}
+
+        if approved:
+            return {"status": "approved", "approved_by": "tty_user"}
+        return {"status": "rejected", "reason": "User rejected"}
+
+    async def check_approval(self, approval_id: str) -> Any:
+        """Check status of a previously pending approval (Phase B).
+
+        CLI does not support async approval polling; always returns rejected.
+        """
+        return {
+            "status": "rejected",
+            "reason": "CLI does not support async approval polling",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Legacy check_approval() — backward-compatible wrapper
+# ---------------------------------------------------------------------------
+
+
+def check_approval(module_def: Any, auto_approve: bool, timeout: int = 60) -> None:
     """Check if module requires approval and handle accordingly.
 
     Returns None if approved (or approval not required).
     Calls sys.exit(46) if denied/timed out/pending.
+
+    Args:
+        module_def: Module descriptor with annotations.
+        auto_approve: If True, bypass approval (--yes flag).
+        timeout: Approval prompt timeout in seconds.
     """
     annotations = getattr(module_def, "annotations", None)
     if annotations is None or (not isinstance(annotations, dict) and not hasattr(annotations, "requires_approval")):
@@ -50,39 +134,32 @@ def check_approval(module_def: Any, auto_approve: bool) -> None:
     # Bypass: APCORE_CLI_AUTO_APPROVE env var
     env_val = os.environ.get("APCORE_CLI_AUTO_APPROVE", "")
     if env_val == "1":
-        logger.info(
-            "Approval bypassed via APCORE_CLI_AUTO_APPROVE for module '%s'.",
-            module_id,
-        )
+        logger.info("Approval bypassed via APCORE_CLI_AUTO_APPROVE for '%s'.", module_id)
         return
     if env_val != "" and env_val != "1":
-        logger.warning(
-            "APCORE_CLI_AUTO_APPROVE is set to '%s', expected '1'. Ignoring.",
-            env_val,
-        )
+        logger.warning("APCORE_CLI_AUTO_APPROVE='%s', expected '1'. Ignoring.", env_val)
 
     # Non-TTY check
-    is_tty = sys.stdin.isatty()
-    if not is_tty:
+    if not sys.stdin.isatty():
         click.echo(
             f"Error: Module '{module_id}' requires approval but no interactive "
             "terminal is available. Use --yes or set APCORE_CLI_AUTO_APPROVE=1 "
             "to bypass.",
             err=True,
         )
-        logger.error(
-            "Non-interactive environment, no bypass provided for module '%s'.",
-            module_id,
-        )
         sys.exit(46)
 
     # TTY prompt
-    _prompt_with_timeout(module_def, timeout=60)
+    _prompt_with_timeout(module_def, timeout=timeout)
+
+
+# ---------------------------------------------------------------------------
+# Internal prompt implementation
+# ---------------------------------------------------------------------------
 
 
 def _prompt_with_timeout(module_def: Any, timeout: int = 60) -> None:
     """Display approval prompt with timeout."""
-    # Clamp timeout to valid range
     timeout = max(1, min(timeout, 3600))
 
     module_id = getattr(module_def, "module_id", getattr(module_def, "canonical_id", "unknown"))
@@ -93,15 +170,27 @@ def _prompt_with_timeout(module_def: Any, timeout: int = 60) -> None:
 
     click.echo(message, err=True)
 
-    if sys.platform != "win32":
-        # Unix: use SIGALRM for timeout
-        _prompt_unix(module_id, timeout)
+    try:
+        approved = _tty_prompt(module_id, timeout)
+    except ApprovalTimeoutError:
+        click.echo(f"Error: Approval prompt timed out after {timeout} seconds.", err=True)
+        sys.exit(46)
+
+    if approved:
+        logger.info("User approved execution of module '%s'.", module_id)
     else:
-        # Windows: use threading.Timer for timeout
-        _prompt_windows(module_id, timeout)
+        click.echo("Error: Approval denied.", err=True)
+        sys.exit(46)
 
 
-def _prompt_unix(module_id: str, timeout: int) -> None:
+def _tty_prompt(module_id: str, timeout: int) -> bool:
+    """Run the TTY prompt with timeout. Returns True if approved, raises on timeout."""
+    if sys.platform != "win32":
+        return _prompt_unix(module_id, timeout)
+    return _prompt_windows(module_id, timeout)
+
+
+def _prompt_unix(module_id: str, timeout: int) -> bool:
     """Unix approval prompt using SIGALRM."""
     import signal
 
@@ -115,27 +204,15 @@ def _prompt_unix(module_id: str, timeout: int) -> None:
         approved = click.confirm("Proceed?", default=False)
     except ApprovalTimeoutError:
         logger.warning("Approval timed out after %ds for module '%s'.", timeout, module_id)
-        click.echo(
-            f"Error: Approval prompt timed out after {timeout} seconds.",
-            err=True,
-        )
-        sys.exit(46)
+        raise
     finally:
-        # Always cancel the alarm and restore the previous handler, regardless of
-        # how the block exits (normal return, sys.exit, KeyboardInterrupt, etc.).
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
 
-    if approved:
-        logger.info("User approved execution of module '%s'.", module_id)
-        return
-    else:
-        logger.warning("Approval rejected by user for module '%s'.", module_id)
-        click.echo("Error: Approval denied.", err=True)
-        sys.exit(46)
+    return approved
 
 
-def _prompt_windows(module_id: str, timeout: int) -> None:
+def _prompt_windows(module_id: str, timeout: int) -> bool:
     """Windows approval prompt using threading.Timer + ctypes."""
     import ctypes
 
@@ -151,19 +228,8 @@ def _prompt_windows(module_id: str, timeout: int) -> None:
     try:
         approved = click.confirm("Proceed?", default=False)
         timer.cancel()
-
-        if approved:
-            logger.info("User approved execution of module '%s'.", module_id)
-            return
-        else:
-            logger.warning("Approval rejected by user for module '%s'.", module_id)
-            click.echo("Error: Approval denied.", err=True)
-            sys.exit(46)
+        return approved
     except ApprovalTimeoutError:
         timer.cancel()
         logger.warning("Approval timed out after %ds for module '%s'.", timeout, module_id)
-        click.echo(
-            f"Error: Approval prompt timed out after {timeout} seconds.",
-            err=True,
-        )
-        sys.exit(46)
+        raise
