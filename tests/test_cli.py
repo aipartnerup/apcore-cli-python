@@ -228,7 +228,8 @@ class TestValidateModuleId:
             validate_module_id(mid)  # Should not raise
 
     def test_validate_module_id_too_long(self):
-        long_id = "a" * 129
+        # PROTOCOL_SPEC §2.7 — bumped from 128 to 192 in spec 1.6.0-draft.
+        long_id = "a" * 193
         with pytest.raises(SystemExit) as exc_info:
             validate_module_id(long_id)
         assert exc_info.value.code == 2
@@ -240,7 +241,8 @@ class TestValidateModuleId:
             assert exc_info.value.code == 2, f"Expected exit 2 for '{mid}'"
 
     def test_validate_module_id_max_length(self):
-        max_id = "a" * 128
+        # PROTOCOL_SPEC §2.7 — bumped from 128 to 192 in spec 1.6.0-draft.
+        max_id = "a" * 192
         validate_module_id(max_id)  # Should not raise
 
 

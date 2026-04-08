@@ -940,10 +940,15 @@ def build_module_command(
 
 
 def validate_module_id(module_id: str) -> None:
-    """Validate module ID format and length."""
-    if len(module_id) > 128:
+    """Validate module ID format and length.
+
+    Length limit tracks PROTOCOL_SPEC §2.7 EBNF constraint #1 — bumped from
+    128 to 192 in spec 1.6.0-draft to accommodate Java/.NET deep-namespace
+    FQN-derived IDs. Filesystem-safe (192 + len('.binding.yaml')=205 < 255).
+    """
+    if len(module_id) > 192:
         click.echo(
-            f"Error: Invalid module ID format: '{module_id}'. Maximum length is 128 characters.",
+            f"Error: Invalid module ID format: '{module_id}'. Maximum length is 192 characters.",
             err=True,
         )
         sys.exit(2)
