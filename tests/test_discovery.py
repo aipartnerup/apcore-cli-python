@@ -295,3 +295,85 @@ class TestGroupedDiscovery:
         assert result.exit_code == 0
         data = json.loads(result.output)
         assert data["id"] == "product.list_products.get"
+
+
+class TestExposureListFilter:
+    """Task 7: list --exposure option."""
+
+    def _make_cli_with_exposure(self, modules, exposure_filter):
+        """Create a CLI with discovery commands and an exposure filter in context."""
+        registry = MagicMock()
+        registry.list.return_value = [m.module_id for m in modules]
+        defs = {m.module_id: m for m in modules}
+        registry.get_definition.side_effect = lambda mid, **kw: defs.get(mid)
+
+        @click.group()
+        @click.pass_context
+        def cli(ctx):
+            ctx.ensure_object(dict)
+            ctx.obj["exposure_filter"] = exposure_filter
+
+        register_discovery_commands(cli, registry)
+        return cli
+
+    def test_list_exposure_exposed_default(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        modules = [
+            _make_mock_module("admin.users", "Manage users"),
+            _make_mock_module("webhooks.stripe", "Stripe hooks"),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        cli = self._make_cli_with_exposure(modules, ef)
+        result = CliRunner().invoke(cli, ["list", "--flat", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        ids = [d["id"] for d in data]
+        assert "admin.users" in ids
+        assert "webhooks.stripe" not in ids
+
+    def test_list_exposure_hidden(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        modules = [
+            _make_mock_module("admin.users", "Manage users"),
+            _make_mock_module("webhooks.stripe", "Stripe hooks"),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        cli = self._make_cli_with_exposure(modules, ef)
+        result = CliRunner().invoke(cli, ["list", "--flat", "--format", "json", "--exposure", "hidden"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        ids = [d["id"] for d in data]
+        assert "webhooks.stripe" in ids
+        assert "admin.users" not in ids
+
+    def test_list_exposure_all_json_format(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        modules = [
+            _make_mock_module("admin.users", "Manage users"),
+            _make_mock_module("webhooks.stripe", "Stripe hooks"),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        cli = self._make_cli_with_exposure(modules, ef)
+        result = CliRunner().invoke(cli, ["list", "--flat", "--format", "json", "--exposure", "all"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert len(data) == 2
+        exposed_map = {d["id"]: d["exposed"] for d in data}
+        assert exposed_map["admin.users"] is True
+        assert exposed_map["webhooks.stripe"] is False
+
+    def test_list_exposure_all_shows_column(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        modules = [
+            _make_mock_module("admin.users", "Manage users"),
+            _make_mock_module("webhooks.stripe", "Stripe hooks"),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        cli = self._make_cli_with_exposure(modules, ef)
+        result = CliRunner().invoke(cli, ["list", "--flat", "--format", "table", "--exposure", "all"])
+        assert result.exit_code == 0
+        assert "Exposure" in result.output

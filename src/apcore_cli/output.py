@@ -39,6 +39,7 @@ def format_module_list(
     format: str,
     filter_tags: tuple[str, ...] = (),
     show_deps: bool = False,
+    exposure_filter: Any | None = None,
 ) -> None:
     """Format and print a list of modules."""
     if format == "table":
@@ -55,15 +56,20 @@ def format_module_list(
         table.add_column("Tags")
         if show_deps:
             table.add_column("Deps", justify="right")
+        if exposure_filter is not None:
+            table.add_column("Exposure")
 
         for m in modules:
             display_name, desc, tags_val = _get_cli_fields(m)
             tags = ", ".join(tags_val) if tags_val else ""
+            row = [display_name, _truncate(desc, 80), tags]
             if show_deps:
                 deps = getattr(m, "dependencies", None) or []
-                table.add_row(display_name, _truncate(desc, 80), tags, str(len(deps)))
-            else:
-                table.add_row(display_name, _truncate(desc, 80), tags)
+                row.append(str(len(deps)))
+            if exposure_filter is not None:
+                mid = getattr(m, "module_id", "")
+                row.append("\u2713" if exposure_filter.is_exposed(mid) else "\u2014")
+            table.add_row(*row)
 
         Console().print(table)
     elif format == "json":
@@ -78,6 +84,8 @@ def format_module_list(
             if show_deps:
                 deps = getattr(m, "dependencies", None) or []
                 entry["dependency_count"] = len(deps)
+            if exposure_filter is not None:
+                entry["exposed"] = exposure_filter.is_exposed(mid)
             result.append(entry)
         click.echo(json.dumps(result, indent=2))
 

@@ -15,24 +15,24 @@ class TestMED1ExtensionsDirFlag:
 
     def test_extensions_dir_flag_overrides_default(self, tmp_path):
         """--extensions-dir should point the registry to a custom path."""
-        from apcore_cli.__main__ import _extract_extensions_dir
+        from apcore_cli.__main__ import _extract_argv_option
 
         # Simulate: apcore-cli --extensions-dir /custom/path list
-        result = _extract_extensions_dir(["--extensions-dir", str(tmp_path), "list"])
+        result = _extract_argv_option(["--extensions-dir", str(tmp_path), "list"], "--extensions-dir")
         assert result == str(tmp_path)
 
     def test_extensions_dir_flag_not_provided(self):
         """When --extensions-dir is omitted, return None."""
-        from apcore_cli.__main__ import _extract_extensions_dir
+        from apcore_cli.__main__ import _extract_argv_option
 
-        result = _extract_extensions_dir(["list", "--format", "json"])
+        result = _extract_argv_option(["list", "--format", "json"], "--extensions-dir")
         assert result is None
 
     def test_extensions_dir_flag_equals_syntax(self, tmp_path):
         """--extensions-dir=/custom/path syntax."""
-        from apcore_cli.__main__ import _extract_extensions_dir
+        from apcore_cli.__main__ import _extract_argv_option
 
-        result = _extract_extensions_dir([f"--extensions-dir={tmp_path}", "list"])
+        result = _extract_argv_option([f"--extensions-dir={tmp_path}", "list"], "--extensions-dir")
         assert result == str(tmp_path)
 
     def test_extensions_dir_used_by_main(self, tmp_path):

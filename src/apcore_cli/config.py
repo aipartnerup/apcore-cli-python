@@ -28,16 +28,23 @@ class ConfigResolver:
     DEFAULTS: dict[str, Any] = {
         "extensions.root": "./extensions",
         "logging.level": "WARNING",
-        "sandbox.enabled": False,
-        "cli.stdin_buffer_limit": 10_485_760,  # 10 MB
-        "cli.auto_approve": False,
         "cli.help_text_max_length": 1000,
-        # Namespace-mode aliases (apcore >= 0.15.0 Config Bus)
-        "apcore-cli.stdin_buffer_limit": 10_485_760,
-        "apcore-cli.auto_approve": False,
-        "apcore-cli.help_text_max_length": 1000,
-        "apcore-cli.logging_level": "WARNING",
+        # FE-11 (v0.6.0)
+        "cli.approval_timeout": 60,
+        "cli.strategy": "standard",
+        "cli.group_depth": 1,
+        # Exposure filtering (FE-12)
+        "expose.mode": "all",
+        "expose.include": [],
+        "expose.exclude": [],
     }
+    # Audit D9 (config cleanup): the unused entries `sandbox.enabled`,
+    # `cli.stdin_buffer_limit`, `cli.auto_approve`, and the four
+    # `apcore-cli.*` namespace aliases were removed in v0.6.x. None of
+    # them were ever read by `resolve()` at runtime — sandbox/auto-approve
+    # come from CLI flags, the stdin buffer is hard-coded, and the
+    # namespace aliases are registered separately via the Config Bus
+    # `register_namespace()` call in `apcore_cli/__init__.py`.
 
     def __init__(
         self,

@@ -203,7 +203,11 @@ class GroupedModuleGroup(LazyModuleGroup):
     """Extended LazyModuleGroup that organises modules into named groups."""
 
     def __init__(self, **kwargs: Any) -> None:
+        from apcore_cli.exposure import ExposureFilter
+
+        exposure_filter = kwargs.pop("exposure_filter", None)
         super().__init__(**kwargs)
+        self._exposure_filter: ExposureFilter = exposure_filter or ExposureFilter()
         self._group_map: dict[str, dict[str, tuple[str, Any]]] = {}
         self._top_level_modules: dict[str, tuple[str, Any]] = {}
         self._group_cache: dict[str, _LazyGroup] = {}
@@ -240,6 +244,8 @@ class GroupedModuleGroup(LazyModuleGroup):
             for module_id in self._registry.list():
                 descriptor = self._descriptor_cache.get(module_id)
                 if descriptor is None:
+                    continue
+                if not self._exposure_filter.is_exposed(module_id):
                     continue
                 group, cmd = self._resolve_group(module_id, descriptor)
                 if group is None:

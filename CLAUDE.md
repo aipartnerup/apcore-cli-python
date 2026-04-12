@@ -27,4 +27,28 @@
 ## Environment
 
 - Python >= 3.11
-- Key dependencies: click >= 8.0, rich >= 13.0, jsonschema >= 4.0, pyyaml >= 6.0
+- Key dependencies: click >= 8.1, rich >= 13.0, jsonschema >= 4.20, pyyaml >= 6.0, keyring >= 24, cryptography >= 41
+- Runtime: apcore >= 0.17.1 (v0.6.0 bump, was 0.15.1)
+- Optional: apcore-toolkit >= 0.4 (install via `pip install apcore-cli[toolkit]`)
+- Dev: pytest, pytest-asyncio, pytest-cov, mypy, ruff
+
+## v0.6.0 Conventions
+
+- Public surface (`__init__.py`): minimal — `__version__`, `create_cli`, `ExposureFilter`,
+  plus re-exported error classes (AuthenticationError, ConfigDecryptionError,
+  ModuleExecutionError, ApprovalTimeoutError, ApprovalDeniedError). All other symbols
+  must be imported via full submodule path (e.g., `from apcore_cli.cli import GroupedModuleGroup`).
+- ExposureFilter + `expose=` kwarg on create_cli (FE-12).
+- `extra_commands=[...]` kwarg on create_cli as the FE-11 extension point (with
+  collision detection against BUILTIN_COMMANDS).
+- Default click Group class is `GroupedModuleGroup` (multi-level grouping since v0.3.0).
+- `system_cmd` module registers runtime system commands (health/usage/enable/disable/
+  reload/config) — FE-11.
+- `strategy` module registers describe-pipeline + --strategy flag — FE-11.
+- `validate` module + --dry-run flag — FE-11.
+- `CliApprovalHandler` async protocol (request_approval/check_approval) — FE-11 §3.5.1.
+- Config Bus namespace registration at package import time (apcore >= 0.15.0).
+- New env vars (v0.6.0): APCORE_CLI_APPROVAL_TIMEOUT, APCORE_CLI_STRATEGY, APCORE_CLI_GROUP_DEPTH.
+- New config keys (v0.6.0): cli.approval_timeout, cli.strategy, cli.group_depth.
+- New exit codes from apcore 0.17.1: CONFIG_BIND_ERROR (65), CONFIG_MOUNT_ERROR (66),
+  ERROR_FORMATTER_DUPLICATE (70), CONFIG_NAMESPACE_* (78).

@@ -86,7 +86,15 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
     @click.option("--reverse", is_flag=True, default=False, help="Reverse sort order.")
     @click.option("--deprecated", is_flag=True, default=False, help="Include deprecated modules.")
     @click.option("--deps", is_flag=True, default=False, help="Show dependency count column.")
+    @click.option(
+        "--exposure",
+        type=click.Choice(["exposed", "hidden", "all"]),
+        default="exposed",
+        help="Filter by exposure status. Default: exposed.",
+    )
+    @click.pass_context
     def list_cmd(
+        ctx: click.Context,
         tag: tuple[str, ...],
         flat: bool,
         output_format: str | None,
@@ -97,6 +105,7 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
         reverse: bool,
         deprecated: bool,
         deps: bool,
+        exposure: str,
     ) -> None:
         """List available modules in the registry."""
         # Validate tag format
@@ -157,10 +166,28 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
             )
         modules.sort(key=lambda m: getattr(m, "module_id", ""), reverse=reverse)
 
+        # Exposure filter (FE-12)
+        show_exposure_col = False
+        obj = (ctx.obj or {}) if ctx else {}
+        exposure_filter = obj.get("exposure_filter")
+        if exposure_filter is not None and exposure != "all":
+            if exposure == "exposed":
+                modules = [m for m in modules if exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+            elif exposure == "hidden":
+                modules = [m for m in modules if not exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+        if exposure == "all" and exposure_filter is not None:
+            show_exposure_col = True
+
         fmt = resolve_format(output_format)
 
         if flat or fmt in ("json", "csv", "yaml", "jsonl"):
-            format_module_list(modules, fmt, filter_tags=tag, show_deps=deps)
+            format_module_list(
+                modules,
+                fmt,
+                filter_tags=tag,
+                show_deps=deps,
+                exposure_filter=exposure_filter if show_exposure_col else None,
+            )
         else:
             # Build grouped dict for table display
             grouped: dict[str | None, list[tuple[str, str, list[str]]]] = {}

@@ -8,7 +8,7 @@ Terminal adapter for apcore. Execute AI-Perceivable modules from the command lin
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
-[![Tests](https://img.shields.io/badge/tests-319%2B%20passed-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-394%2B%20passed-brightgreen.svg)]()
 
 | | |
 |---|---|
@@ -48,7 +48,7 @@ Terminal adapter for apcore. Execute AI-Perceivable modules from the command lin
 pip install apcore-cli
 ```
 
-Requires Python 3.11+ and `apcore >= 0.14.0`.
+Requires Python 3.11+ and `apcore >= 0.17.1`.
 
 ## Quick Start
 
@@ -113,6 +113,44 @@ cli(standalone_mode=True)
 # Executor is auto-built from the registry if omitted.
 # You can also provide your own:
 cli = create_cli(registry=registry, executor=executor, prog_name="myapp")
+```
+
+#### Python API
+
+The `apcore_cli` package exposes three public symbols:
+
+| Export | Description |
+|--------|-------------|
+| `__version__` | Package version string |
+| `create_cli(...)` | Factory that builds a ready-to-invoke `click.Group`. See the [`create_cli` reference](https://github.com/aiperceivable/apcore-cli) in the docs site for the full 8-parameter signature (`extensions_dir`, `prog_name`, `commands_dir`, `binding_path`, `registry`, `executor`, `extra_commands`, `expose`). |
+| `ExposureFilter` | Declarative filter controlling which modules are exposed by the CLI (FE-12). |
+
+**Exposure filtering** — restrict which modules are visible at the CLI layer without touching the underlying registry:
+
+```python
+from apcore_cli import create_cli, ExposureFilter
+
+# Only expose admin.* modules
+cli = create_cli(
+    registry=registry,
+    executor=executor,
+    expose=ExposureFilter(mode="include", include=["admin.*"]),
+)
+
+# Or pass a config dict (equivalent)
+cli = create_cli(
+    registry=registry,
+    executor=executor,
+    expose={"mode": "exclude", "exclude": ["debug.*", "test.*"]},
+)
+```
+
+`ExposureFilter` supports `mode="all"` (default), `"include"`, and `"exclude"`, plus `ExposureFilter.from_config(config)` for dict-based construction, `.is_exposed(module_id)`, and `.filter_modules(module_ids)`.
+
+**Injecting custom commands** — pass `extra_commands=[...]` to attach arbitrary Click commands alongside the auto-generated module commands (FE-11 extension point):
+
+```python
+cli = create_cli(registry=registry, executor=executor, extra_commands=[my_custom_click_cmd])
 ```
 
 Or use the `LazyModuleGroup` directly with Click:
@@ -224,12 +262,41 @@ apcore-cli [OPTIONS] COMMAND [ARGS]
 
 ### Built-in Commands
 
+apcore-cli ships with 14 built-in commands covering module invocation, runtime system management, workflow, and shell integration.
+
+**Module invocation**
+
 | Command | Description |
 |---------|-------------|
-| `list` | List available modules with optional tag filtering |
-| `describe <module_id>` | Show full module metadata and schemas |
+| `exec <module_id>` | Execute a module (delegates to `Executor.call()`) |
+| `list` | List registered modules (supports `--tag`/`--search`/`--status`/`--annotation`/`--sort`/`--reverse`/`--deprecated`/`--deps` filters) |
+| `describe <module_id>` | Show full module metadata and schema |
+
+**System management** (FE-11, v0.6.0)
+
+| Command | Description |
+|---------|-------------|
+| `config get/set <key>` | Read or update runtime config values |
+| `health [<module_id>]` | Show module health status |
+| `usage [<module_id>]` | Show module usage statistics |
+| `enable <module_id>` | Enable a disabled module |
+| `disable <module_id>` | Disable a module at runtime |
+| `reload <module_id>` | Hot-reload a module from disk |
+
+**Workflow**
+
+| Command | Description |
+|---------|-------------|
+| `validate <module_id>` | Preflight-check a module without executing it (`--dry-run`) |
+| `describe-pipeline` | Show execution pipeline steps for a strategy (FE-11) |
+| `init module <module_id>` | Scaffold a new module (`--style decorator\|convention\|binding`) |
+
+**Shell integration**
+
+| Command | Description |
+|---------|-------------|
 | `completion <shell>` | Generate shell completion script (bash/zsh/fish) |
-| `man <command>` | Generate man page in roff format |
+| `man <command>` | Generate roff man page for a command |
 
 ### Module Execution Options
 
@@ -240,10 +307,19 @@ When executing a module (e.g. `apcore-cli math.add`), these built-in options are
 | `--input -` | Read JSON input from STDIN |
 | `--yes` / `-y` | Bypass approval prompts |
 | `--large-input` | Allow STDIN input larger than 10MB |
-| `--format` | Output format: `json` or `table` |
+| `--format` | Output format: `{json, table, csv, yaml, jsonl}` |
 | `--sandbox` | Run module in subprocess sandbox *(not yet implemented)* |
+| `--dry-run` | Run preflight checks without executing (FE-11, v0.6.0) |
+| `--trace` | Emit execution pipeline trace (v0.6.0) |
+| `--stream` | Stream results line-by-line for stream-capable modules (v0.6.0) |
+| `--strategy <name>` | Override execution strategy: `standard`/`internal`/`testing`/`performance`/`minimal` (v0.6.0) |
+| `--fields <csv>` | Select specific output fields using dot-path notation (v0.6.0) |
+| `--approval-timeout <seconds>` | Override approval timeout (default 60) (v0.6.0) |
+| `--approval-token <token>` | Provide a pre-obtained approval token (v0.6.0) |
 
 Schema-generated flags (e.g. `--a`, `--b`) are added automatically from the module's `input_schema`.
+
+The `list` command gained several discovery filters in v0.6.0: `--search`, `--status`, `--annotation`, `--sort`, `--reverse`, `--deprecated`, and `--deps`.
 
 ### Exit Codes
 
@@ -280,6 +356,9 @@ apcore-cli uses a 4-tier configuration precedence:
 | `APCORE_AUTH_API_KEY` | API key for remote registry authentication | *(unset)* |
 | `APCORE_CLI_SANDBOX` | Set to `1` to enable subprocess sandboxing | *(unset)* |
 | `APCORE_CLI_HELP_TEXT_MAX_LENGTH` | Maximum characters for CLI option help text before truncation | `1000` |
+| `APCORE_CLI_APPROVAL_TIMEOUT` | Approval-gate timeout in seconds (v0.6.0) | `60` |
+| `APCORE_CLI_STRATEGY` | Default execution strategy (v0.6.0) | `standard` |
+| `APCORE_CLI_GROUP_DEPTH` | Depth of automatic command grouping by `.` segments (v0.6.0) | `1` |
 
 ### Config File (`apcore.yaml`)
 
@@ -292,6 +371,9 @@ sandbox:
   enabled: false
 cli:
   help_text_max_length: 1000
+  approval_timeout: 60     # v0.6.0
+  strategy: standard       # v0.6.0
+  group_depth: 1           # v0.6.0
 ```
 
 ## Features
@@ -332,18 +414,24 @@ User / AI Agent (terminal)
     v
 apcore-cli (the adapter)
     |
-    +-- ConfigResolver       4-tier config precedence
-    +-- LazyModuleGroup      Dynamic Click command generation
-    +-- set_verbose_help     Toggle built-in option visibility
-    +-- set_docs_url         Set base URL for online docs
-    +-- build_program_man_page  Full-program roff man page
-    +-- configure_man_help   Add --help --man support to any CLI
-    +-- schema_parser        JSON Schema -> Click options
-    +-- ref_resolver         $ref / allOf / anyOf / oneOf
-    +-- approval             TTY-aware HITL approval
-    +-- output               TTY-adaptive JSON/table output
-    +-- AuditLogger          JSON Lines execution logging
-    +-- Sandbox              Subprocess isolation
+    +-- ConfigResolver            4-tier config precedence
+    +-- GroupedModuleGroup (default)  Multi-level command grouping (wraps LazyModuleGroup)
+    +-- LazyModuleGroup           Lazy per-module Click command construction (base class)
+    +-- ExposureFilter            Declarative module exposure filtering (FE-12)
+    +-- CliApprovalHandler        Async approval handler protocol implementation (FE-11)
+    +-- system_cmd                Runtime system-management (health/usage/enable/disable/reload/config)
+    +-- strategy                  Execution strategy dispatch (--strategy flag and describe-pipeline)
+    +-- init_cmd                  Module scaffolding (init subcommand)
+    +-- set_verbose_help          Toggle built-in option visibility
+    +-- set_docs_url              Set base URL for online docs
+    +-- build_program_man_page    Full-program roff man page
+    +-- configure_man_help        Add --help --man support to any CLI
+    +-- schema_parser             JSON Schema -> Click options
+    +-- ref_resolver              $ref / allOf / anyOf / oneOf
+    +-- approval                  TTY-aware HITL approval
+    +-- output                    TTY-adaptive JSON/table output
+    +-- AuditLogger               JSON Lines execution logging
+    +-- Sandbox                   Subprocess isolation
     |
     v
 apcore Registry + Executor (your modules, unchanged)
@@ -436,7 +524,7 @@ apcore-cli --extensions-dir ./extensions greet.hello --name Alice --greeting Hi
 git clone https://github.com/aiperceivable/apcore-cli-python.git
 cd apcore-cli-python
 pip install -e ".[dev]"
-pytest                           # 319+ tests
+pytest                           # 394+ tests
 pytest --cov                     # with coverage report
 bash examples/run_examples.sh   # run all examples
 ```
