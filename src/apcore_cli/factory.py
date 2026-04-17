@@ -1,51 +1,38 @@
-"""Entry point for apcore-cli (FE-01).
+"""apcore-cli factory — `create_cli` lives here so it can be imported as a
+library without pulling in `__main__`'s entry-point semantics (FE-01).
 
-This module is the script entry point. The `create_cli` factory has been
-relocated to `apcore_cli.factory` per audit finding D9 (parallel_impl) so
-downstream projects can import the factory without pulling in this module's
-script semantics. This file is now intentionally tiny: it only handles the
-pre-Click argv extraction needed before `create_cli` is called.
+This module was extracted from `__main__.py` per audit finding D9 (parallel_impl)
+so that downstream projects can `from apcore_cli import create_cli` (or
+`from apcore_cli.factory import create_cli`) without importing the binary
+entry-point script module.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
+from importlib.metadata import PackageNotFoundError
+from importlib.metadata import version as _get_version
+from typing import Any
 
-# Re-export create_cli for backward compatibility — older callers may import
-# `from apcore_cli.__main__ import create_cli`. The canonical import path is
-# `from apcore_cli import create_cli` (or `apcore_cli.factory`).
-from apcore_cli.factory import create_cli
+import click
 
+from apcore_cli.cli import GroupedModuleGroup, set_audit_logger, set_verbose_help
+from apcore_cli.config import ConfigResolver
+from apcore_cli.discovery import register_discovery_commands
+from apcore_cli.exposure import ExposureFilter
+from apcore_cli.security.audit import AuditLogger
+from apcore_cli.shell import configure_man_help, register_shell_commands
 
-def _extract_argv_option(argv: list[str] | None, flag: str) -> str | None:
-    """Extract an option value from argv before Click parses it.
+try:
+    __version__ = _get_version("apcore-cli")
+except PackageNotFoundError:
+    __version__ = "unknown"
 
-    This is needed because certain options must be resolved before Click runs.
-    Returns None if the flag is not present.
-    """
-    args = argv if argv is not None else sys.argv[1:]
-    for i, arg in enumerate(args):
-        if arg == flag and i + 1 < len(args):
-            return args[i + 1]
-        if arg.startswith(f"{flag}="):
-            return arg.split("=", 1)[1]
-    return None
+logger = logging.getLogger("apcore_cli")
 
-
-<<<<<<< HEAD
-def _extract_extensions_dir(argv: list[str] | None = None) -> str | None:
-    """Extract --extensions-dir value from argv before Click parses it."""
-    return _extract_argv_option(argv, "--extensions-dir")
-
-
-def _extract_commands_dir(argv: list[str] | None = None) -> str | None:
-    """Extract --commands-dir value from argv before Click parses it."""
-    return _extract_argv_option(argv, "--commands-dir")
-
-
-def _extract_binding_path(argv: list[str] | None = None) -> str | None:
-    """Extract --binding value from argv before Click parses it."""
-    return _extract_argv_option(argv, "--binding")
+EXIT_CONFIG_NOT_FOUND = 47
 
 
 def _has_verbose_flag(argv: list[str] | None = None) -> bool:
@@ -63,7 +50,7 @@ def create_cli(
     executor: Any | None = None,
     extra_commands: list[Any] | None = None,
     app: Any | None = None,
-    expose: Any | None = None,
+    expose: dict | ExposureFilter | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -86,16 +73,16 @@ def create_cli(
         executor: Pre-built apcore Executor instance. When provided alongside
                   registry, skips Executor construction. If omitted but registry
                   is provided, an Executor is built from the given registry.
+        extra_commands: Extra Click commands to add to the CLI root (FE-11 §3.11).
+                        Names must not collide with BUILTIN_COMMANDS.
         app: APCore unified client (apcore >= 0.18.0). Mutually exclusive with
              registry/executor. When provided, registry and executor are extracted
              from app.registry and app.executor. Filesystem discovery is skipped
              if app.registry already has registered modules; otherwise discovery
              proceeds into app.registry. Note: ext_dir validation still runs when
              the app registry is empty (discovery fallthrough path).
-        expose: Exposure filter configuration (FE-12). Accepts an ExposureFilter
-                instance, a dict matching the apcore.yaml ``expose`` section schema
-                (``{"mode": "include", "include": [...]}``), or None to fall back
-                to the config-file / env-var / default (mode=all) precedence chain.
+        expose: Module exposure filter (FE-12). Accepts an ExposureFilter instance
+                or a dict that ExposureFilter.from_config can parse.
     """
     if app is not None and (registry is not None or executor is not None):
         raise ValueError("app is mutually exclusive with registry/executor")
@@ -275,16 +262,6 @@ def create_cli(
             click.echo(f"Error: Failed to initialize registry: {e}", err=True)
             sys.exit(EXIT_CONFIG_NOT_FOUND)
 
-    # Build exposure filter (FE-12) — 4-tier precedence:
-    # create_cli(expose=...) > env var > apcore.yaml > default (mode=all)
-    if isinstance(expose, ExposureFilter):
-        exposure_filter: ExposureFilter = expose
-    elif isinstance(expose, dict):
-        exposure_filter = ExposureFilter.from_config({"expose": expose})
-    else:
-        # Fall through to config file / default
-        exposure_filter = ExposureFilter.from_config(config._config_file or {})
-
     # Initialize audit logger
     try:
         audit_logger = AuditLogger()
@@ -308,12 +285,34 @@ def create_cli(
     except Exception as e:
         logger.debug("Could not wire CliApprovalHandler: %s", e)
 
+    # Build exposure filter (FE-12)
+    if isinstance(expose, ExposureFilter):
+        exposure_filter = expose
+    elif isinstance(expose, dict):
+        exposure_filter = ExposureFilter.from_config({"expose": expose})
+    else:
+        expose_mode = config.resolve("expose.mode", env_var="APCORE_CLI_EXPOSE_MODE")
+        expose_include = config.resolve("expose.include")
+        expose_exclude = config.resolve("expose.exclude")
+        if expose_mode and expose_mode != "all":
+            exposure_filter = ExposureFilter.from_config(
+                {
+                    "expose": {
+                        "mode": expose_mode,
+                        "include": expose_include or [],
+                        "exclude": expose_exclude or [],
+                    }
+                }
+            )
+        else:
+            exposure_filter = ExposureFilter()
+
     @click.group(
         cls=GroupedModuleGroup,
         registry=registry,
         executor=executor,
-        exposure_filter=exposure_filter,
         help_text_max_length=help_text_max_length,
+        exposure_filter=exposure_filter,
         name=prog_name,
         help="CLI adapter for the apcore module ecosystem.",
     )
@@ -323,19 +322,19 @@ def create_cli(
     )
     @click.option(
         "--extensions-dir",
-        "_extensions_dir_opt",
+        "extensions_dir_opt",
         default=None,
         help="Path to apcore extensions directory.",
     )
     @click.option(
         "--commands-dir",
-        expose_value=False,
+        "commands_dir_opt",
         default=None,
         help="Path to convention-based commands directory.",
     )
     @click.option(
         "--binding",
-        expose_value=False,
+        "binding_opt",
         default=None,
         help="Path to binding.yaml file or directory for display resolution.",
     )
@@ -355,7 +354,9 @@ def create_cli(
     @click.pass_context
     def cli(
         ctx: click.Context,
-        _extensions_dir_opt: str | None = None,
+        extensions_dir_opt: str | None = None,
+        commands_dir_opt: str | None = None,
+        binding_opt: str | None = None,
         log_level: str | None = None,
         verbose_help: bool = False,
     ) -> None:
@@ -367,12 +368,12 @@ def create_cli(
             apcore_level = level if level <= logging.INFO else logging.ERROR
             logging.getLogger("apcore").setLevel(apcore_level)
         ctx.ensure_object(dict)
-        # _extensions_dir_opt is captured by closure in subcommands; store the resolved dir.
-        ctx.obj["extensions_dir"] = _extensions_dir_opt or ext_dir
+        ctx.obj["extensions_dir"] = ext_dir
         ctx.obj["verbose_help"] = verbose_help
+        ctx.obj["exposure_filter"] = exposure_filter
 
     # Register discovery commands (list, describe)
-    register_discovery_commands(cli, registry, exposure_filter=exposure_filter)
+    register_discovery_commands(cli, registry)
 
     # Register validate command (FE-11 §3.1)
     from apcore_cli.discovery import register_validate_command
@@ -412,28 +413,3 @@ def create_cli(
             cli.add_command(cmd)
 
     return cli
-
-
-=======
->>>>>>> 53ee43d3d6413c18c9b931fb5233de8ddcd693dd
-def main(prog_name: str | None = None) -> None:
-    """Main entry point for apcore-cli.
-
-    Args:
-        prog_name: Override the program name shown in help/version output.
-                   When None, inferred from sys.argv[0] automatically.
-    """
-    ext_dir = _extract_argv_option(None, "--extensions-dir")
-    cmd_dir = _extract_argv_option(None, "--commands-dir")
-    bind_path = _extract_argv_option(None, "--binding")
-    cli = create_cli(
-        extensions_dir=ext_dir,
-        prog_name=prog_name,
-        commands_dir=cmd_dir,
-        binding_path=bind_path,
-    )
-    cli(standalone_mode=True)
-
-
-if __name__ == "__main__":
-    main()

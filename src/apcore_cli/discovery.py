@@ -97,7 +97,9 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
         default="exposed",
         help="Filter by exposure status. Default: exposed.",
     )
-    def list_cmd(  # pyright: ignore[reportUnusedVariable]
+    @click.pass_context
+    def list_cmd(
+        ctx: click.Context,
         tag: tuple[str, ...],
         flat: bool,
         output_format: str | None,
@@ -175,6 +177,18 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
                 sort,
             )
         modules.sort(key=lambda m: getattr(m, "module_id", ""), reverse=reverse)
+
+        # Exposure filter (FE-12)
+        show_exposure_col = False
+        obj = (ctx.obj or {}) if ctx else {}
+        exposure_filter = obj.get("exposure_filter")
+        if exposure_filter is not None and exposure != "all":
+            if exposure == "exposed":
+                modules = [m for m in modules if exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+            elif exposure == "hidden":
+                modules = [m for m in modules if not exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+        if exposure == "all" and exposure_filter is not None:
+            show_exposure_col = True
 
         fmt = resolve_format(output_format)
 

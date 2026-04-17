@@ -552,7 +552,7 @@ def _make_mock_module_def_with_display(module_id, description="desc", display=No
     return m
 
 
-def _make_grouped_group(module_defs, builtins=True):
+def _make_grouped_group(module_defs, builtins=True, exposure_filter=None):
     """Helper: build a GroupedModuleGroup from a list of (module_id, descriptor) pairs."""
     ids = [mid for mid, _ in module_defs]
     registry = _make_mock_registry(ids)
@@ -560,11 +560,10 @@ def _make_grouped_group(module_defs, builtins=True):
     def_map = dict(module_defs)
     registry.get_definition.side_effect = lambda mid: def_map.get(mid)
     executor = _make_mock_executor()
-    group = GroupedModuleGroup(
-        registry=registry,
-        executor=executor,
-        name="cli",
-    )
+    kwargs = dict(registry=registry, executor=executor, name="cli")
+    if exposure_filter is not None:
+        kwargs["exposure_filter"] = exposure_filter
+    group = GroupedModuleGroup(**kwargs)
     if builtins:
         for name in ["exec", "list", "describe", "completion", "man"]:
             group.add_command(click.Command(name, callback=lambda: None))
@@ -950,6 +949,7 @@ class TestVerboseHelp:
             cli_mod._verbose_help = original
 
 
+<<<<<<< ours
 class TestCreateCliWithApp:
     """Tests for the create_cli(app=...) parameter (apcore >= 0.18.0)."""
 
@@ -1037,3 +1037,158 @@ class TestCreateCliWithApp:
         assert isinstance(cli, GroupedModuleGroup)
         # The executor stored in the group should be app.executor (not a newly-constructed one)
         assert cli._executor is mock_exec
+=======
+class TestExposureInGroupedModuleGroup:
+    """Task 4: ExposureFilter integration into GroupedModuleGroup."""
+
+    def test_build_group_map_with_include_filter(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users")),
+            ("admin.config", _make_mock_module_def_with_display("admin.config")),
+            ("webhooks.stripe", _make_mock_module_def_with_display("webhooks.stripe")),
+            ("user.create", _make_mock_module_def_with_display("user.create")),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        group = _make_grouped_group(defs, builtins=False, exposure_filter=ef)
+        group._build_group_map()
+        assert "admin" in group._group_map
+        assert len(group._group_map["admin"]) == 2
+        assert "webhooks" not in group._group_map
+        assert "user" not in group._group_map
+        assert len(group._top_level_modules) == 0
+
+    def test_build_group_map_with_exclude_filter(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users")),
+            ("webhooks.stripe", _make_mock_module_def_with_display("webhooks.stripe")),
+            ("user.create", _make_mock_module_def_with_display("user.create")),
+        ]
+        ef = ExposureFilter(mode="exclude", exclude=["webhooks.*"])
+        group = _make_grouped_group(defs, builtins=False, exposure_filter=ef)
+        group._build_group_map()
+        assert "admin" in group._group_map
+        assert "user" in group._group_map
+        assert "webhooks" not in group._group_map
+
+    def test_build_group_map_default_filter_exposes_all(self):
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users")),
+            ("webhooks.stripe", _make_mock_module_def_with_display("webhooks.stripe")),
+        ]
+        group = _make_grouped_group(defs, builtins=False)
+        group._build_group_map()
+        assert "admin" in group._group_map
+        assert "webhooks" in group._group_map
+
+    def test_list_commands_respects_filter(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users")),
+            ("user.create", _make_mock_module_def_with_display("user.create")),
+            ("webhooks.stripe", _make_mock_module_def_with_display("webhooks.stripe")),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        group = _make_grouped_group(defs, builtins=True, exposure_filter=ef)
+        ctx = click.Context(group)
+        cmds = group.list_commands(ctx)
+        assert "admin" in cmds
+        assert "user" not in cmds
+        assert "webhooks" not in cmds
+
+    def test_get_command_hidden_group_returns_none(self):
+        from apcore_cli.exposure import ExposureFilter
+
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users")),
+            ("user.create", _make_mock_module_def_with_display("user.create")),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        group = _make_grouped_group(defs, builtins=True, exposure_filter=ef)
+        ctx = click.Context(group)
+        assert group.get_command(ctx, "user") is None
+        assert group.get_command(ctx, "admin") is not None
+
+
+class TestCreateCliExposure:
+    """Task 5: create_cli() with expose parameter."""
+
+    def test_create_cli_with_exposure_filter_instance(self, tmp_path):
+        from apcore_cli.__main__ import create_cli
+        from apcore_cli.exposure import ExposureFilter
+
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        cli = create_cli(extensions_dir=str(tmp_path), prog_name="test-cli", expose=ef)
+        assert isinstance(cli, GroupedModuleGroup)
+        assert cli._exposure_filter is ef
+
+    def test_create_cli_with_exposure_dict(self, tmp_path):
+        from apcore_cli.__main__ import create_cli
+
+        cli = create_cli(
+            extensions_dir=str(tmp_path),
+            prog_name="test-cli",
+            expose={"mode": "exclude", "exclude": ["webhooks.*"]},
+        )
+        assert cli._exposure_filter._mode == "exclude"
+
+    def test_create_cli_default_no_exposure(self, tmp_path):
+        from apcore_cli.__main__ import create_cli
+
+        cli = create_cli(extensions_dir=str(tmp_path), prog_name="test-cli")
+        assert cli._exposure_filter._mode == "all"
+
+
+class TestExposureE2E:
+    """Task 8: End-to-end exposure filtering tests."""
+
+    def _make_e2e_group_with_filter(self, include=None, exclude=None, mode="include"):
+        from apcore_cli.exposure import ExposureFilter
+
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users", "Manage users")),
+            ("admin.config", _make_mock_module_def_with_display("admin.config", "Manage config")),
+            ("user.create", _make_mock_module_def_with_display("user.create", "Create user")),
+            ("webhooks.stripe", _make_mock_module_def_with_display("webhooks.stripe", "Stripe hooks")),
+        ]
+        ef = ExposureFilter(mode=mode, include=include or [], exclude=exclude or [])
+        return _make_grouped_group(defs, builtins=True, exposure_filter=ef)
+
+    def test_help_only_shows_exposed_groups(self):
+        from click.testing import CliRunner
+
+        group = self._make_e2e_group_with_filter(include=["admin.*"])
+        result = CliRunner().invoke(group, ["--help"])
+        assert result.exit_code == 0
+        assert "admin" in result.output
+        # The hidden groups should not appear anywhere in the help output
+        # (except possibly inside the word "Commands" etc. — check the Groups section)
+        if "Groups:" in result.output:
+            groups_section = result.output.split("Groups:")[1].split("\n\n")[0]
+            assert "user" not in groups_section
+            assert "webhooks" not in groups_section
+
+    def test_hidden_command_not_in_help(self):
+        from click.testing import CliRunner
+
+        group = self._make_e2e_group_with_filter(include=["admin.*"])
+        result = CliRunner().invoke(group, ["user", "--help"])
+        assert result.exit_code == 2
+
+    def test_exec_bypasses_exposure_filter(self):
+        """Hidden modules are still in the registry and accessible via exec."""
+        from apcore_cli.exposure import ExposureFilter
+
+        defs = [
+            ("admin.users", _make_mock_module_def_with_display("admin.users", "Manage users")),
+            ("webhooks.stripe", _make_mock_module_def_with_display("webhooks.stripe", "Stripe hooks")),
+        ]
+        ef = ExposureFilter(mode="include", include=["admin.*"])
+        group = _make_grouped_group(defs, builtins=True, exposure_filter=ef)
+        # The registry still has webhooks.stripe even though it's hidden from CLI
+        assert group._registry.get_definition("webhooks.stripe") is not None
+>>>>>>> theirs

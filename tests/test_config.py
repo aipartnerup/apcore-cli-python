@@ -20,13 +20,19 @@ class TestConfigResolverSkeleton:
         assert resolver._cli_flags == flags
 
     def test_defaults_contains_expected_keys(self):
+        # Audit D9 (config cleanup, v0.6.x): sandbox.enabled, cli.auto_approve,
+        # cli.stdin_buffer_limit, and the apcore-cli.* aliases were removed
+        # because resolve() never reads them. Sandbox is configured via the
+        # --sandbox CLI flag; auto-approve via --yes; stdin buffer is hard-coded.
         resolver = ConfigResolver()
         expected_keys = [
             "extensions.root",
             "logging.level",
-            "sandbox.enabled",
-            "cli.stdin_buffer_limit",
             "cli.help_text_max_length",
+            "cli.approval_timeout",
+            "cli.strategy",
+            "cli.group_depth",
+            "expose.mode",
         ]
         for key in expected_keys:
             assert key in resolver.DEFAULTS, f"Missing default key: {key}"
@@ -146,14 +152,21 @@ class TestNamespaceAwareConfigResolution:
     """Config Bus namespace ↔ legacy key fallback (apcore >= 0.15.0)."""
 
     def test_defaults_contain_namespace_keys(self):
+        # Audit D9 (config cleanup, v0.6.x): the apcore-cli.* alias entries
+        # were removed from DEFAULTS because resolve() never reads them via
+        # the DEFAULTS dict — namespace lookup is handled by the Config Bus
+        # registration in apcore_cli/__init__.py and by the bidirectional
+        # _NAMESPACE_TO_LEGACY map at file-lookup time. The cross-key file
+        # resolution still works (verified by the tests below).
         resolver = ConfigResolver()
-        for key in [
-            "apcore-cli.stdin_buffer_limit",
-            "apcore-cli.auto_approve",
-            "apcore-cli.help_text_max_length",
-            "apcore-cli.logging_level",
-        ]:
-            assert key in resolver.DEFAULTS, f"Missing namespace default: {key}"
+        for ns_key, legacy_key in resolver._NAMESPACE_TO_LEGACY.items():
+            assert ns_key.startswith("apcore-cli.")
+            assert legacy_key in {
+                "cli.stdin_buffer_limit",
+                "cli.auto_approve",
+                "cli.help_text_max_length",
+                "logging.level",
+            }
 
     def test_resolve_namespace_key_from_legacy_config_file(self, tmp_path, clean_env):
         """Querying 'apcore-cli.stdin_buffer_limit' finds 'cli.stdin_buffer_limit' in file."""
@@ -184,3 +197,26 @@ class TestNamespaceAwareConfigResolution:
         assert len(resolver._NAMESPACE_TO_LEGACY) == len(resolver._LEGACY_TO_NAMESPACE)
         for ns_key, legacy_key in resolver._NAMESPACE_TO_LEGACY.items():
             assert resolver._LEGACY_TO_NAMESPACE[legacy_key] == ns_key
+
+
+class TestConfigExpose:
+    """Task 6: Exposure filtering config keys."""
+
+    def test_resolve_expose_mode_from_file(self, tmp_path):
+        config_file = tmp_path / "apcore.yaml"
+        config_file.write_text("expose:\n  mode: include\n")
+        resolver = ConfigResolver(config_path=str(config_file))
+        assert resolver.resolve("expose.mode") == "include"
+
+    def test_resolve_expose_include_from_file(self, tmp_path):
+        config_file = tmp_path / "apcore.yaml"
+        config_file.write_text("expose:\n  include:\n    - admin.*\n    - jobs.*\n")
+        resolver = ConfigResolver(config_path=str(config_file))
+        result = resolver.resolve("expose.include")
+        assert result == ["admin.*", "jobs.*"]
+
+    def test_expose_defaults(self):
+        resolver = ConfigResolver(config_path="/nonexistent/apcore.yaml")
+        assert resolver.resolve("expose.mode") == "all"
+        assert resolver.resolve("expose.include") == []
+        assert resolver.resolve("expose.exclude") == []

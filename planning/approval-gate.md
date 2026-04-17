@@ -24,7 +24,9 @@
   - `test_env_var_not_one_warns`: `APCORE_CLI_AUTO_APPROVE=true` → WARNING logged, NOT bypassed.
   - `test_yes_flag_priority_over_env`: Both `--yes` and env var set → `--yes` logged as bypass source.
 
-**GREEN** — Implement `check_approval(module_def, auto_approve, ctx)` with bypass logic.
+**GREEN** — Implement `check_approval(module_def, auto_approve, timeout=60)` with bypass logic.
+
+> Note: Signature updated v0.2.0 (dropped `ctx`), v0.6.0 (added `timeout`).
 
 **REFACTOR** — None expected.
 

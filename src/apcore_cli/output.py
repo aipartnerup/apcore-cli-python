@@ -93,6 +93,8 @@ def format_module_list(
             if show_deps:
                 deps = getattr(m, "dependencies", None) or []
                 entry["dependency_count"] = len(deps)
+            if exposure_filter is not None:
+                entry["exposed"] = exposure_filter.is_exposed(mid)
             result.append(entry)
         click.echo(json.dumps(result, indent=2))
 

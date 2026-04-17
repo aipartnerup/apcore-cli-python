@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`create_cli(app=...)` parameter**: `create_cli()` accepts an optional `app: APCore` unified client (introduced in `apcore 0.18.0`). `app` is mutually exclusive with `registry`/`executor` (raises `ValueError`). When `app` is provided, `registry` and `executor` are extracted from `app.registry` and `app.executor`. Filesystem discovery is skipped if `app.registry` already contains registered modules; otherwise normal discovery proceeds into `app.registry`.
+- **FE-12: Module Exposure Filtering** — Declarative control over which discovered modules are exposed as CLI commands.
+  - `ExposureFilter` class in `exposure.py` with `is_exposed(module_id)` and `filter_modules(ids)` methods.
+  - Three modes: `all` (default), `include` (whitelist), `exclude` (blacklist) with glob-pattern matching.
+  - `ExposureFilter.from_config(dict)` classmethod for loading from `apcore.yaml` `expose` section.
+  - `create_cli(expose=...)` parameter accepting `dict` or `ExposureFilter` instance.
+  - `list --exposure {exposed,hidden,all}` filter flag in discovery commands.
+  - `GroupedModuleGroup._build_group_map()` integration: calls `ExposureFilter.is_exposed()` to filter command registration.
+  - `ConfigResolver` gains `expose.*` config keys.
+  - 4-tier config precedence: `CliConfig.expose` > `--expose-mode` CLI flag > env var > `apcore.yaml`.
+  - Hidden modules remain invocable via `exec <module_id>`.
+- New file: `exposure.py`.
 
 ---
 

@@ -30,6 +30,20 @@ except (ImportError, AttributeError):
     pass  # apcore < 0.15.0 or not installed
 
 # Public API re-exports
-from apcore_cli.__main__ import create_cli
+from apcore_cli.approval import ApprovalTimeoutError
+from apcore_cli.exposure import ExposureFilter
+from apcore_cli.factory import create_cli
+from apcore_cli.security.auth import AuthenticationError
+from apcore_cli.security.config_encryptor import ConfigDecryptionError
+from apcore_cli.security.sandbox import ModuleExecutionError
 
-__all__ = ["__version__", "create_cli"]
+__all__ = [
+    "__version__",
+    "create_cli",
+    "ExposureFilter",
+    # Error classes (FE-11 parity with TypeScript — see audit D1-009)
+    "ApprovalTimeoutError",
+    "AuthenticationError",
+    "ConfigDecryptionError",
+    "ModuleExecutionError",
+]

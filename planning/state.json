@@ -67,6 +67,22 @@
         "task-8-shell-completion": "completed",
         "task-9-e2e-integration": "completed"
       }
+    },
+    "exposure-filtering": {
+      "status": "completed",
+      "plan": "exposure-filtering.md",
+      "priority": "P1",
+      "depends_on": ["core-dispatcher", "grouped-commands", "config-resolver", "discovery"],
+      "tasks": {
+        "task-1-glob-match": "completed",
+        "task-2-exposure-filter": "completed",
+        "task-3-from-config": "completed",
+        "task-4-wire-grouped-module-group": "completed",
+        "task-5-wire-create-cli": "completed",
+        "task-6-config-resolver": "completed",
+        "task-7-list-exposure-option": "completed",
+        "task-8-e2e-integration": "completed"
+      }
     }
   },
   "implementation_order": [
@@ -78,6 +94,7 @@
     "approval-gate",
     "security-manager",
     "shell-integration",
-    "grouped-commands"
+    "grouped-commands",
+    "exposure-filtering"
   ]
 }

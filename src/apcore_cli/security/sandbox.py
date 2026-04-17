@@ -20,8 +20,16 @@ class ModuleExecutionError(Exception):
 
 
 class Sandbox:
-    def __init__(self, enabled: bool = False) -> None:
+    """Subprocess-isolated module execution.
+
+    Audit D1-005 parity (v0.6.x): the `timeout_seconds` parameter mirrors
+    the Rust `Sandbox::new(enabled, timeout_ms)` API. When `enabled=False`,
+    `execute()` is a passthrough to the injected apcore Executor.
+    """
+
+    def __init__(self, enabled: bool = False, timeout_seconds: int = 300) -> None:
         self._enabled = enabled
+        self._timeout_seconds = timeout_seconds
 
     def execute(self, module_id: str, input_data: dict, executor: Executor) -> Any:
         if not self._enabled:
@@ -49,7 +57,7 @@ class Sandbox:
                     text=True,
                     env=env,
                     cwd=tmpdir,
-                    timeout=300,
+                    timeout=self._timeout_seconds,
                 )
             except subprocess.TimeoutExpired as err:
                 raise ModuleExecutionError(f"Error: Module '{module_id}' timed out in sandbox.") from err
