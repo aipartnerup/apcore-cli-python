@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock
 
 import pytest
-
 from apcore_cli.security.auth import AuthenticationError, AuthProvider
 
 

@@ -39,8 +39,18 @@ def format_module_list(
     format: str,
     filter_tags: tuple[str, ...] = (),
     show_deps: bool = False,
+    exposure_filter: Any | None = None,
 ) -> None:
-    """Format and print a list of modules."""
+    """Format and print a list of modules.
+
+    Args:
+        modules: Module descriptors to display.
+        format: Output format string (table, json, csv, yaml, jsonl).
+        filter_tags: Tags used for filtering (shown in empty-result message).
+        show_deps: When True, adds a dependency count column to table output.
+        exposure_filter: When not None, adds an "Exposure" column (✓/—) showing
+                         each module's exposure status per FE-12.
+    """
     if format == "table":
         if not modules and filter_tags:
             click.echo(f"No modules found matching tags: {', '.join(filter_tags)}.")
@@ -55,15 +65,20 @@ def format_module_list(
         table.add_column("Tags")
         if show_deps:
             table.add_column("Deps", justify="right")
+        if exposure_filter is not None:
+            table.add_column("Exposure", justify="center")
 
         for m in modules:
             display_name, desc, tags_val = _get_cli_fields(m)
             tags = ", ".join(tags_val) if tags_val else ""
+            row: list[str] = [display_name, _truncate(desc, 80), tags]
             if show_deps:
                 deps = getattr(m, "dependencies", None) or []
-                table.add_row(display_name, _truncate(desc, 80), tags, str(len(deps)))
-            else:
-                table.add_row(display_name, _truncate(desc, 80), tags)
+                row.append(str(len(deps)))
+            if exposure_filter is not None:
+                mid = getattr(m, "module_id", display_name)
+                row.append("\u2713" if exposure_filter.is_exposed(mid) else "\u2014")
+            table.add_row(*row)
 
         Console().print(table)
     elif format == "json":

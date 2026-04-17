@@ -14,6 +14,7 @@ import click
 from apcore_cli.cli import GroupedModuleGroup, set_audit_logger, set_verbose_help
 from apcore_cli.config import ConfigResolver
 from apcore_cli.discovery import register_discovery_commands
+from apcore_cli.exposure import ExposureFilter  # pyright: ignore[reportMissingImports]
 from apcore_cli.security.audit import AuditLogger
 from apcore_cli.shell import configure_man_help, register_shell_commands
 
@@ -71,6 +72,8 @@ def create_cli(
     registry: Any | None = None,
     executor: Any | None = None,
     extra_commands: list[Any] | None = None,
+    app: Any | None = None,
+    expose: Any | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -93,7 +96,24 @@ def create_cli(
         executor: Pre-built apcore Executor instance. When provided alongside
                   registry, skips Executor construction. If omitted but registry
                   is provided, an Executor is built from the given registry.
+        app: APCore unified client (apcore >= 0.18.0). Mutually exclusive with
+             registry/executor. When provided, registry and executor are extracted
+             from app.registry and app.executor. Filesystem discovery is skipped
+             if app.registry already has registered modules; otherwise discovery
+             proceeds into app.registry. Note: ext_dir validation still runs when
+             the app registry is empty (discovery fallthrough path).
+        expose: Exposure filter configuration (FE-12). Accepts an ExposureFilter
+                instance, a dict matching the apcore.yaml ``expose`` section schema
+                (``{"mode": "include", "include": [...]}``), or None to fall back
+                to the config-file / env-var / default (mode=all) precedence chain.
     """
+    if app is not None and (registry is not None or executor is not None):
+        raise ValueError("app is mutually exclusive with registry/executor")
+
+    if app is not None:
+        registry = app.registry
+        executor = app.executor
+
     if prog_name is None:
         prog_name = os.path.basename(sys.argv[0]) or "apcore-cli"
 
@@ -141,19 +161,61 @@ def create_cli(
         raise ValueError("executor requires registry — pass both or neither")
 
     if registry is not None:
-        # Pre-populated registry provided — skip filesystem discovery.
-        try:
-            from apcore import Executor as _Executor
+        # Pre-populated registry provided.
+        # When called via app=, skip discovery only if the registry already has modules;
+        # otherwise fall through to filesystem discovery into the provided registry.
+        _app_registry_has_modules = (app is not None) and len(list(registry.list())) > 0
+        _skip_discovery = (app is None) or _app_registry_has_modules
 
-            if executor is None:
-                executor = _Executor(registry)
-            logger.info("Using pre-populated registry (%d modules).", len(list(registry.list())))
-        except Exception as e:
-            click.echo(
-                f"Error: Failed to initialize executor from provided registry: {e}",
-                err=True,
-            )
-            sys.exit(EXIT_CONFIG_NOT_FOUND)
+        if _skip_discovery:
+            # Skip filesystem discovery entirely.
+            try:
+                from apcore import Executor as _Executor
+
+                if executor is None:
+                    executor = _Executor(registry)
+                logger.info("Using pre-populated registry (%d modules).", len(list(registry.list())))
+            except Exception as e:
+                click.echo(
+                    f"Error: Failed to initialize executor from provided registry: {e}",
+                    err=True,
+                )
+                sys.exit(EXIT_CONFIG_NOT_FOUND)
+        else:
+            # app= was provided but registry is empty — run discovery into app.registry.
+            ext_dir_missing = not os.path.exists(ext_dir)
+            ext_dir_unreadable = not ext_dir_missing and not os.access(ext_dir, os.R_OK)
+
+            if ext_dir_missing:
+                click.echo(
+                    f"Error: Extensions directory not found: '{ext_dir}'."
+                    " Set APCORE_EXTENSIONS_ROOT or verify the path.",
+                    err=True,
+                )
+                sys.exit(EXIT_CONFIG_NOT_FOUND)
+
+            if ext_dir_unreadable:
+                click.echo(
+                    f"Error: Cannot read extensions directory: '{ext_dir}'. Check permissions.",
+                    err=True,
+                )
+                sys.exit(EXIT_CONFIG_NOT_FOUND)
+
+            try:
+                logger.debug("Loading extensions from %s (into app.registry)", ext_dir)
+                count = registry.discover()
+                logger.info("Initialized apcore-cli with %d modules (via app.registry).", count)
+            except Exception as e:
+                logger.warning("Discovery failed: %s", e)
+
+            try:
+                from apcore import Executor as _Executor
+
+                if executor is None:
+                    executor = _Executor(registry)
+            except Exception as e:
+                click.echo(f"Error: Failed to initialize executor from app.registry: {e}", err=True)
+                sys.exit(EXIT_CONFIG_NOT_FOUND)
     else:
         # Standard path: discover modules from filesystem.
         ext_dir_missing = not os.path.exists(ext_dir)
@@ -223,6 +285,16 @@ def create_cli(
             click.echo(f"Error: Failed to initialize registry: {e}", err=True)
             sys.exit(EXIT_CONFIG_NOT_FOUND)
 
+    # Build exposure filter (FE-12) — 4-tier precedence:
+    # create_cli(expose=...) > env var > apcore.yaml > default (mode=all)
+    if isinstance(expose, ExposureFilter):
+        exposure_filter: ExposureFilter = expose
+    elif isinstance(expose, dict):
+        exposure_filter = ExposureFilter.from_config({"expose": expose})
+    else:
+        # Fall through to config file / default
+        exposure_filter = ExposureFilter.from_config(config._config_file or {})
+
     # Initialize audit logger
     try:
         audit_logger = AuditLogger()
@@ -250,6 +322,7 @@ def create_cli(
         cls=GroupedModuleGroup,
         registry=registry,
         executor=executor,
+        exposure_filter=exposure_filter,
         help_text_max_length=help_text_max_length,
         name=prog_name,
         help="CLI adapter for the apcore module ecosystem.",
@@ -260,19 +333,19 @@ def create_cli(
     )
     @click.option(
         "--extensions-dir",
-        "extensions_dir_opt",
+        "_extensions_dir_opt",
         default=None,
         help="Path to apcore extensions directory.",
     )
     @click.option(
         "--commands-dir",
-        "commands_dir_opt",
+        expose_value=False,
         default=None,
         help="Path to convention-based commands directory.",
     )
     @click.option(
         "--binding",
-        "binding_opt",
+        expose_value=False,
         default=None,
         help="Path to binding.yaml file or directory for display resolution.",
     )
@@ -292,9 +365,7 @@ def create_cli(
     @click.pass_context
     def cli(
         ctx: click.Context,
-        extensions_dir_opt: str | None = None,
-        commands_dir_opt: str | None = None,
-        binding_opt: str | None = None,
+        _extensions_dir_opt: str | None = None,
         log_level: str | None = None,
         verbose_help: bool = False,
     ) -> None:
@@ -306,11 +377,12 @@ def create_cli(
             apcore_level = level if level <= logging.INFO else logging.ERROR
             logging.getLogger("apcore").setLevel(apcore_level)
         ctx.ensure_object(dict)
-        ctx.obj["extensions_dir"] = ext_dir
+        # _extensions_dir_opt is captured by closure in subcommands; store the resolved dir.
+        ctx.obj["extensions_dir"] = _extensions_dir_opt or ext_dir
         ctx.obj["verbose_help"] = verbose_help
 
     # Register discovery commands (list, describe)
-    register_discovery_commands(cli, registry)
+    register_discovery_commands(cli, registry, exposure_filter=exposure_filter)
 
     # Register validate command (FE-11 §3.1)
     from apcore_cli.discovery import register_validate_command

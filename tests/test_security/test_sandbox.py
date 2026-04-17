@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from apcore_cli.security.sandbox import ModuleExecutionError, Sandbox
 
 

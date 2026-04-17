@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## [0.7.0] - 2026-04-15
+
+### Changed
+
+- **Dependency bump**: requires `apcore >= 0.18.0` (was `>= 0.17.1`). Aligns with upstream `apcore 0.18.0` and `apcore-toolkit 0.4.2` breaking changes.
+- **`MAX_MODULE_ID_LENGTH` 128 → 192**: `validate_module_id()` and all references updated to the new 192-character limit introduced in `apcore 0.18.0` (`apcore.registry.registry.MAX_MODULE_ID_LENGTH`).
+- **`describe-pipeline` renders `StrategyInfo`**: `executor.describe_pipeline(strategy)` now returns a `StrategyInfo` dataclass (`name`, `step_count`, `step_names`, `description`). `strategy.py` updated to use `StrategyInfo` fields; header line is `Pipeline: {info.name} ({info.step_count} steps)`. Falls back gracefully to the legacy `_resolve_strategy_name` path when `describe_pipeline` is unavailable.
+
+### Added
+
+- **`create_cli(app=...)` parameter**: `create_cli()` accepts an optional `app: APCore` unified client (introduced in `apcore 0.18.0`). `app` is mutually exclusive with `registry`/`executor` (raises `ValueError`). When `app` is provided, `registry` and `executor` are extracted from `app.registry` and `app.executor`. Filesystem discovery is skipped if `app.registry` already contains registered modules; otherwise normal discovery proceeds into `app.registry`.
+
+---
+
 ## [0.6.0] - 2026-04-06
 
 ### Changed

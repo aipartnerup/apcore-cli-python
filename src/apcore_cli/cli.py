@@ -27,6 +27,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("apcore_cli.cli")
 
+# BUILTIN_COMMANDS is a manually-maintained list of command names that are
+# registered by create_cli() before any module-derived commands are added.
+# It cannot be derived programmatically at import time because the commands
+# are registered lazily at CLI-build time (inside create_cli()), and this
+# constant is needed during that build to detect name collisions. If you
+# add or remove a built-in command in __main__.py, update this list too.
 BUILTIN_COMMANDS = [
     "completion",
     "config",
@@ -202,8 +208,14 @@ class LazyModuleGroup(click.Group):
 class GroupedModuleGroup(LazyModuleGroup):
     """Extended LazyModuleGroup that organises modules into named groups."""
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, exposure_filter: Any | None = None, **kwargs: Any) -> None:
         super().__init__(**kwargs)
+        # Lazy import to avoid circular imports at module load time.
+        if exposure_filter is None:
+            from apcore_cli.exposure import ExposureFilter
+
+            exposure_filter = ExposureFilter()
+        self._exposure_filter = exposure_filter
         self._group_map: dict[str, dict[str, tuple[str, Any]]] = {}
         self._top_level_modules: dict[str, tuple[str, Any]] = {}
         self._group_cache: dict[str, _LazyGroup] = {}
@@ -232,7 +244,11 @@ class GroupedModuleGroup(LazyModuleGroup):
         return (None, cli_name)
 
     def _build_group_map(self) -> None:
-        """Build the group map from registry modules."""
+        """Build the group map from registry modules.
+
+        Applies the exposure filter before building groups — hidden modules are
+        excluded from --help and tab-completion but remain invocable via exec.
+        """
         if self._group_map_built:
             return
         try:
@@ -240,6 +256,9 @@ class GroupedModuleGroup(LazyModuleGroup):
             for module_id in self._registry.list():
                 descriptor = self._descriptor_cache.get(module_id)
                 if descriptor is None:
+                    continue
+                # Skip modules that should not appear as CLI commands (FE-12).
+                if not self._exposure_filter.is_exposed(module_id):
                     continue
                 group, cmd = self._resolve_group(module_id, descriptor)
                 if group is None:

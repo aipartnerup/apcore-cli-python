@@ -41,8 +41,13 @@ def _resolve_group_for_display(descriptor: Any) -> tuple[str | None, str]:
     return GroupedModuleGroup._resolve_group(module_id, descriptor)
 
 
-def register_discovery_commands(cli: click.Group, registry: Any) -> None:
+def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter: Any | None = None) -> None:
     """Register list and describe commands on the CLI group."""
+    # Import here to avoid circular imports at module level.
+    from apcore_cli.exposure import ExposureFilter
+
+    if exposure_filter is None:
+        exposure_filter = ExposureFilter()
 
     @cli.command("list")
     @click.option("--tag", multiple=True, help="Filter modules by tag (AND logic). Repeatable.")
@@ -86,7 +91,13 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
     @click.option("--reverse", is_flag=True, default=False, help="Reverse sort order.")
     @click.option("--deprecated", is_flag=True, default=False, help="Include deprecated modules.")
     @click.option("--deps", is_flag=True, default=False, help="Show dependency count column.")
-    def list_cmd(
+    @click.option(
+        "--exposure",
+        type=click.Choice(["exposed", "hidden", "all"]),
+        default="exposed",
+        help="Filter by exposure status. Default: exposed.",
+    )
+    def list_cmd(  # pyright: ignore[reportUnusedVariable]
         tag: tuple[str, ...],
         flat: bool,
         output_format: str | None,
@@ -97,6 +108,7 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
         reverse: bool,
         deprecated: bool,
         deps: bool,
+        exposure: str,
     ) -> None:
         """List available modules in the registry."""
         # Validate tag format
@@ -149,6 +161,13 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
                 attr = _ann_map.get(ann_flag, ann_flag)
                 modules = [m for m in modules if getattr(getattr(m, "annotations", None), attr, False) is True]
 
+        # Exposure filter (FE-12)
+        if exposure == "exposed":
+            modules = [m for m in modules if exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+        elif exposure == "hidden":
+            modules = [m for m in modules if not exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+        # "all": no filter — show all regardless of exposure status
+
         # Sort
         if sort in ("calls", "errors", "latency"):
             logger.warning(
@@ -159,8 +178,16 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
 
         fmt = resolve_format(output_format)
 
+        show_exposure_col = exposure == "all"  # pyright: ignore[reportUnusedVariable]
+
         if flat or fmt in ("json", "csv", "yaml", "jsonl"):
-            format_module_list(modules, fmt, filter_tags=tag, show_deps=deps)
+            format_module_list(
+                modules,
+                fmt,
+                filter_tags=tag,
+                show_deps=deps,
+                exposure_filter=exposure_filter if show_exposure_col else None,
+            )
         else:
             # Build grouped dict for table display
             grouped: dict[str | None, list[tuple[str, str, list[str]]]] = {}
@@ -179,7 +206,7 @@ def register_discovery_commands(cli: click.Group, registry: Any) -> None:
         default=None,
         help="Output format. Default: table (TTY) or json (non-TTY).",
     )
-    def describe_cmd(module_id: str, output_format: str | None) -> None:
+    def describe_cmd(module_id: str, output_format: str | None) -> None:  # pyright: ignore[reportUnusedVariable]
         """Show metadata, schema, and annotations for a module."""
         validate_module_id(module_id)
 
@@ -206,7 +233,7 @@ def register_validate_command(cli: click.Group, registry: Any, executor: Any) ->
         default=None,
         help="Output format.",
     )
-    def validate_cmd(module_id: str, stdin_input: str | None, output_format: str | None) -> None:
+    def validate_cmd(module_id: str, stdin_input: str | None, output_format: str | None) -> None:  # pyright: ignore[reportUnusedVariable]
         """Run preflight checks without executing a module."""
         validate_module_id(module_id)
 

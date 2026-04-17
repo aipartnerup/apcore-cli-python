@@ -2,9 +2,8 @@
 
 import click
 import pytest
-from click.testing import CliRunner
-
 from apcore_cli.init_cmd import register_init_command
+from click.testing import CliRunner
 
 
 @pytest.fixture

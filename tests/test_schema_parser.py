@@ -4,7 +4,6 @@ import logging
 
 import click
 import pytest
-
 from apcore_cli.schema_parser import (
     _BOOLEAN_FLAG,
     _extract_help,

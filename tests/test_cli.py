@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-
 from apcore_cli.cli import (
     GroupedModuleGroup,
     LazyModuleGroup,
@@ -245,14 +244,34 @@ class TestValidateModuleId:
         max_id = "a" * 192
         validate_module_id(max_id)  # Should not raise
 
+    def test_max_module_id_length_constant_is_192(self):
+        """Conformance: apcore.MAX_MODULE_ID_LENGTH must equal 192 (spec 1.6.0-draft §2.7)."""
+        try:
+            from apcore.registry.registry import MAX_MODULE_ID_LENGTH
+
+            assert MAX_MODULE_ID_LENGTH == 192, (
+                f"Expected MAX_MODULE_ID_LENGTH=192, got {MAX_MODULE_ID_LENGTH}. "
+                "Update validate_module_id() if apcore changes the limit."
+            )
+        except ImportError:
+            pytest.skip("apcore not installed — skipping MAX_MODULE_ID_LENGTH constant check")
+
+    def test_validate_module_id_192_accepted_129_not_special(self):
+        """A 192-char ID must be accepted; a 193-char ID must be rejected."""
+        # 192 chars: accepted
+        validate_module_id("a" * 192)  # must not raise
+        # 193 chars: rejected (over the limit)
+        with pytest.raises(SystemExit) as exc_info:
+            validate_module_id("a" * 193)
+        assert exc_info.value.code == 2
+
 
 class TestMainEntryPoint:
     """Task 5: main() entry point and CLI integration."""
 
     def test_main_help_flag(self, tmp_path):
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path)), ["--help"])
@@ -260,9 +279,8 @@ class TestMainEntryPoint:
         assert "apcore-cli" in result.output.lower() or "apcore" in result.output.lower()
 
     def test_main_version_flag(self, tmp_path):
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path), prog_name="apcore-cli"), ["--version"])
@@ -274,7 +292,6 @@ class TestMainEntryPoint:
 
     def test_main_extensions_dir_not_found(self):
         import pytest
-
         from apcore_cli.__main__ import create_cli
 
         with pytest.raises(SystemExit) as exc_info:
@@ -282,9 +299,8 @@ class TestMainEntryPoint:
         assert exc_info.value.code == 47
 
     def test_main_extensions_dir_valid(self, tmp_path):
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         # Create a minimal extensions dir
         (tmp_path / "apcore.yaml").write_text("modules: {}\n")
@@ -295,12 +311,11 @@ class TestMainEntryPoint:
         )
         assert result.exit_code == 0
 
-    def test_log_level_flag_takes_effect(self, tmp_path, monkeypatch):
+    def test_log_level_flag_takes_effect(self, tmp_path):
         import logging
 
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         original_level = logging.getLogger().level
         try:
@@ -332,9 +347,8 @@ class TestMainEntryPoint:
     def test_cli_logging_level_takes_priority_over_global(self, tmp_path, monkeypatch):
         import logging
 
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         original_level = logging.getLogger().level
         try:
@@ -352,9 +366,8 @@ class TestMainEntryPoint:
     def test_cli_logging_level_fallback_to_global(self, tmp_path, monkeypatch):
         import logging
 
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         # CLI-specific not set — must fall back to global
         monkeypatch.delenv("APCORE_CLI_LOGGING_LEVEL", raising=False)
@@ -935,3 +948,92 @@ class TestVerboseHelp:
             assert cli_mod._verbose_help is False
         finally:
             cli_mod._verbose_help = original
+
+
+class TestCreateCliWithApp:
+    """Tests for the create_cli(app=...) parameter (apcore >= 0.18.0)."""
+
+    def _make_mock_app(self, module_ids=None):
+        """Create a mock APCore app object with registry and executor."""
+        app = MagicMock()
+        registry = MagicMock()
+        module_list = module_ids or []
+        registry.list_modules.return_value = module_list
+        registry.list.return_value = module_list
+        app.registry = registry
+        app.executor = _make_mock_executor()
+        return app
+
+    def test_app_mutually_exclusive_with_registry(self):
+        """Passing both app= and registry= raises ValueError."""
+        from apcore_cli.__main__ import create_cli
+
+        app = self._make_mock_app(["math.add"])
+        registry = _make_mock_registry(["math.add"])
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            create_cli(app=app, registry=registry)
+
+    def test_app_mutually_exclusive_with_executor(self):
+        """Passing both app= and executor= raises ValueError."""
+        from apcore_cli.__main__ import create_cli
+
+        app = self._make_mock_app(["math.add"])
+        executor = _make_mock_executor()
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            create_cli(app=app, executor=executor)
+
+    def test_app_extracts_registry_and_executor(self):
+        """When app has a pre-populated registry, create_cli skips filesystem discovery."""
+        from unittest.mock import patch
+
+        from apcore_cli.__main__ import create_cli
+
+        app = self._make_mock_app(["math.add"])
+
+        # The function does `from apcore import Executor as _Executor` inside create_cli;
+        # patch builtins.__import__ would be fragile, so instead patch the import at the
+        # module level by injecting a fake apcore into sys.modules temporarily.
+        import sys
+
+        fake_apcore = MagicMock()
+        fake_apcore.Executor.return_value = _make_mock_executor()
+        with patch.dict(sys.modules, {"apcore": fake_apcore}):
+            # app.executor is already set, so a new Executor should NOT be constructed
+            cli = create_cli(app=app, prog_name="test-cli")
+
+        assert isinstance(cli, GroupedModuleGroup)
+
+    def test_app_with_empty_registry_falls_through_to_discovery(self, tmp_path):
+        """When app.registry is empty, create_cli attempts filesystem discovery."""
+        from apcore_cli.__main__ import create_cli
+
+        # Empty registry — no modules registered yet
+        app = self._make_mock_app(module_ids=[])
+
+        # Point to a non-existent extensions dir so discovery fails with EXIT_CONFIG_NOT_FOUND
+        nonexistent_dir = str(tmp_path / "no_such_dir")
+
+        with pytest.raises(SystemExit) as exc_info:
+            create_cli(app=app, extensions_dir=nonexistent_dir, prog_name="test-cli")
+
+        assert exc_info.value.code == 47  # EXIT_CONFIG_NOT_FOUND
+
+    def test_app_without_executor_uses_app_executor(self):
+        """The executor extracted from app is used in the returned CLI group."""
+        import sys
+        from unittest.mock import patch
+
+        from apcore_cli.__main__ import create_cli
+
+        mock_exec = _make_mock_executor()
+        app = self._make_mock_app(["math.add"])
+        app.executor = mock_exec
+
+        fake_apcore = MagicMock()
+        fake_apcore.Executor.return_value = _make_mock_executor()
+        with patch.dict(sys.modules, {"apcore": fake_apcore}):
+            cli = create_cli(app=app, prog_name="test-cli")
+
+        assert isinstance(cli, GroupedModuleGroup)
+        # The executor stored in the group should be app.executor (not a newly-constructed one)
+        assert cli._executor is mock_exec
