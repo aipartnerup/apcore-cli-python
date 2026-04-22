@@ -4,6 +4,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from apcore_cli.approval import ApprovalTimeoutError, check_approval
 
 

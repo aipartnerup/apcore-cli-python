@@ -1,7 +1,20 @@
-"""Discovery commands — list, describe, validate (FE-04, FE-11)."""
+"""Discovery commands — list, describe, exec, validate (FE-04, FE-11, FE-13).
+
+FE-13 §4.9 split the batched ``register_discovery_commands`` into four
+per-subcommand registrars (``register_list_command``,
+``register_describe_command``, ``register_exec_command``,
+``register_validate_command``). The per-command shape is required for
+apcli include/exclude filtering — the factory dispatcher decides at
+registration time whether each subcommand should be attached to the
+``apcli`` group or skipped.
+
+The legacy :func:`register_discovery_commands` remains as a thin wrapper
+so pre-v0.7 test fixtures and call sites keep working.
+"""
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import sys
@@ -9,9 +22,15 @@ from typing import Any
 
 import click
 
-from apcore_cli.cli import format_preflight_result, validate_module_id
+from apcore_cli.cli import (
+    _first_failed_exit_code,
+    collect_input,
+    format_preflight_result,
+    validate_module_id,
+)
 from apcore_cli.display_helpers import get_cli_display_fields
 from apcore_cli.output import (
+    format_exec_result,
     format_grouped_module_list,
     format_module_detail,
     format_module_list,
@@ -41,15 +60,27 @@ def _resolve_group_for_display(descriptor: Any) -> tuple[str | None, str]:
     return GroupedModuleGroup._resolve_group(module_id, descriptor)
 
 
-def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter: Any | None = None) -> None:
-    """Register list and describe commands on the CLI group."""
-    # Import here to avoid circular imports at module level.
+# ---------------------------------------------------------------------------
+# Per-subcommand registrars (FE-13 §4.9)
+# ---------------------------------------------------------------------------
+
+
+def register_list_command(
+    apcli_group: click.Group,
+    registry: Any,
+    exposure_filter: Any | None = None,
+) -> None:
+    """Register the ``list`` subcommand on the given group.
+
+    Accepts the apcli Click group (post-FE-13 canonical attachment point)
+    or any other Click group for back-compat test fixtures.
+    """
     from apcore_cli.exposure import ExposureFilter
 
     if exposure_filter is None:
         exposure_filter = ExposureFilter()
 
-    @cli.command("list")
+    @apcli_group.command("list")
     @click.option("--tag", multiple=True, help="Filter modules by tag (AND logic). Repeatable.")
     @click.option("--flat", is_flag=True, default=False, help="Show flat list (no grouping).")
     @click.option(
@@ -113,9 +144,14 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
         exposure: str,
     ) -> None:
         """List available modules in the registry."""
-        # Validate tag format
         for t in tag:
             _validate_tag(t)
+
+        # Prefer a filter pushed into ctx.obj (factory.py wires it there);
+        # fall back to the closure-captured default (mode=all) for tests.
+        obj = (ctx.obj or {}) if ctx else {}
+        ctx_filter = obj.get("exposure_filter") if isinstance(obj, dict) else None
+        active_filter = ctx_filter if ctx_filter is not None else exposure_filter
 
         modules = []
         for mid in registry.list():
@@ -123,12 +159,10 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
             if mdef is not None:
                 modules.append(mdef)
 
-        # Tag filter
         if tag:
             filter_tags = set(tag)
             modules = [m for m in modules if filter_tags.issubset(set(getattr(m, "tags", [])))]
 
-        # Search filter (case-insensitive substring on id + description)
         if search:
             query = search.lower()
             modules = [
@@ -138,18 +172,14 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
                 or query in (getattr(m, "description", "") or "").lower()
             ]
 
-        # Status filter
         if status == "enabled":
             modules = [m for m in modules if getattr(m, "enabled", None) is not False]
         elif status == "disabled":
             modules = [m for m in modules if getattr(m, "enabled", None) is False]
-        # "all": no filter
 
-        # Deprecated filter (excluded by default)
         if not deprecated:
             modules = [m for m in modules if getattr(m, "deprecated", False) is not True]
 
-        # Annotation filter (AND logic)
         if annotation:
             _ann_map = {
                 "destructive": "destructive",
@@ -163,14 +193,11 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
                 attr = _ann_map.get(ann_flag, ann_flag)
                 modules = [m for m in modules if getattr(getattr(m, "annotations", None), attr, False) is True]
 
-        # Exposure filter (FE-12)
         if exposure == "exposed":
-            modules = [m for m in modules if exposure_filter.is_exposed(getattr(m, "module_id", ""))]
+            modules = [m for m in modules if active_filter.is_exposed(getattr(m, "module_id", ""))]
         elif exposure == "hidden":
-            modules = [m for m in modules if not exposure_filter.is_exposed(getattr(m, "module_id", ""))]
-        # "all": no filter — show all regardless of exposure status
+            modules = [m for m in modules if not active_filter.is_exposed(getattr(m, "module_id", ""))]
 
-        # Sort
         if sort in ("calls", "errors", "latency"):
             logger.warning(
                 "Usage data not available; sorting by id. Sort by %s requires system.usage modules.",
@@ -178,21 +205,8 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
             )
         modules.sort(key=lambda m: getattr(m, "module_id", ""), reverse=reverse)
 
-        # Exposure filter (FE-12)
-        show_exposure_col = False
-        obj = (ctx.obj or {}) if ctx else {}
-        exposure_filter = obj.get("exposure_filter")
-        if exposure_filter is not None and exposure != "all":
-            if exposure == "exposed":
-                modules = [m for m in modules if exposure_filter.is_exposed(getattr(m, "module_id", ""))]
-            elif exposure == "hidden":
-                modules = [m for m in modules if not exposure_filter.is_exposed(getattr(m, "module_id", ""))]
-        if exposure == "all" and exposure_filter is not None:
-            show_exposure_col = True
-
         fmt = resolve_format(output_format)
-
-        show_exposure_col = exposure == "all"  # pyright: ignore[reportUnusedVariable]
+        show_exposure_col = exposure == "all"
 
         if flat or fmt in ("json", "csv", "yaml", "jsonl"):
             format_module_list(
@@ -200,10 +214,9 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
                 fmt,
                 filter_tags=tag,
                 show_deps=deps,
-                exposure_filter=exposure_filter if show_exposure_col else None,
+                exposure_filter=active_filter if show_exposure_col else None,
             )
         else:
-            # Build grouped dict for table display
             grouped: dict[str | None, list[tuple[str, str, list[str]]]] = {}
             for m in modules:
                 group_name, cmd_name = _resolve_group_for_display(m)
@@ -211,7 +224,13 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
                 grouped.setdefault(group_name, []).append((cmd_name, desc, tags_val))
             format_grouped_module_list(grouped, filter_tags=tag)
 
-    @cli.command("describe")
+    _ = list_cmd  # silence unused-var checker
+
+
+def register_describe_command(apcli_group: click.Group, registry: Any) -> None:
+    """Register the ``describe`` subcommand on the given group."""
+
+    @apcli_group.command("describe")
     @click.argument("module_id")
     @click.option(
         "--format",
@@ -220,7 +239,7 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
         default=None,
         help="Output format. Default: table (TTY) or json (non-TTY).",
     )
-    def describe_cmd(module_id: str, output_format: str | None) -> None:  # pyright: ignore[reportUnusedVariable]
+    def describe_cmd(module_id: str, output_format: str | None) -> None:
         """Show metadata, schema, and annotations for a module."""
         validate_module_id(module_id)
 
@@ -232,12 +251,97 @@ def register_discovery_commands(cli: click.Group, registry: Any, exposure_filter
         fmt = resolve_format(output_format)
         format_module_detail(module_def, fmt)
 
+    _ = describe_cmd
 
-def register_validate_command(cli: click.Group, registry: Any, executor: Any) -> None:
-    """Register the standalone validate command."""
-    from apcore_cli.cli import _first_failed_exit_code, collect_input
 
-    @cli.command("validate")
+def register_exec_command(
+    apcli_group: click.Group,
+    registry: Any,
+    executor: Any,
+) -> None:
+    """Register the generic ``exec`` subcommand on the apcli group (FE-13).
+
+    Dispatch shape: ``apcli exec <module-id> [--input JSON] [--format fmt]``.
+    Unlike the per-module commands built by :func:`build_module_command`, this
+    command does not derive options from the module's input schema — inputs
+    are passed as a JSON object via ``--input``.
+    """
+    from apcore_cli.approval import check_approval
+    from apcore_cli.cli import _ERROR_CODE_MAP, _emit_error_tty
+
+    @apcli_group.command("exec")
+    @click.argument("module_id")
+    @click.option(
+        "--format",
+        "output_format",
+        type=click.Choice(["json", "table", "csv", "yaml", "jsonl"]),
+        default=None,
+        help="Output format.",
+    )
+    @click.option("--fields", default=None, help="Comma-separated dot-paths to select from the result.")
+    @click.option(
+        "--input",
+        "stdin_input",
+        default=None,
+        help="JSON object passed as input to the module. Use '-' to read JSON from stdin.",
+    )
+    @click.option("-y", "--yes", "auto_approve", is_flag=True, default=False, help="Auto-approve.")
+    @click.option(
+        "--approval-timeout",
+        type=int,
+        default=None,
+        help="Seconds to wait for interactive approval.",
+    )
+    def exec_cmd(
+        module_id: str,
+        output_format: str | None,
+        fields: str | None,
+        stdin_input: str | None,
+        auto_approve: bool,
+        approval_timeout: int | None,
+    ) -> None:
+        """Execute a module by ID with JSON input."""
+        validate_module_id(module_id)
+
+        module_def = registry.get_definition(module_id)
+        if module_def is None:
+            click.echo(f"Error: Module '{module_id}' not found.", err=True)
+            sys.exit(44)
+
+        # Distinguish stdin marker from inline JSON literal.
+        merged: dict[str, Any] = {}
+        if stdin_input == "-":
+            merged = collect_input("-", {}, False)
+        elif stdin_input is not None:
+            try:
+                parsed = json.loads(stdin_input)
+            except json.JSONDecodeError as e:
+                click.echo(f"Error: --input is not valid JSON: {e}", err=True)
+                sys.exit(2)
+            if not isinstance(parsed, dict):
+                click.echo("Error: --input JSON must be an object.", err=True)
+                sys.exit(2)
+            merged = parsed
+
+        try:
+            timeout = approval_timeout if approval_timeout is not None else 60
+            check_approval(module_def, auto_approve=auto_approve, timeout=timeout)
+            result = executor.call(module_id, merged)
+            fmt = resolve_format(output_format)
+            format_exec_result(result, fmt, fields)
+        except Exception as e:
+            code = getattr(e, "code", None)
+            exit_code = _ERROR_CODE_MAP.get(code, 1) if isinstance(code, str) else 1
+            _emit_error_tty(e, exit_code)
+            sys.exit(exit_code)
+
+    _ = exec_cmd
+
+
+def register_validate_command(apcli_group: click.Group, registry: Any, executor: Any) -> None:
+    """Register the ``validate`` subcommand on the given group."""
+
+    @apcli_group.command("validate")
     @click.argument("module_id")
     @click.option("--input", "stdin_input", default=None, help="JSON input file or '-' for stdin.")
     @click.option(
@@ -247,7 +351,7 @@ def register_validate_command(cli: click.Group, registry: Any, executor: Any) ->
         default=None,
         help="Output format.",
     )
-    def validate_cmd(module_id: str, stdin_input: str | None, output_format: str | None) -> None:  # pyright: ignore[reportUnusedVariable]
+    def validate_cmd(module_id: str, stdin_input: str | None, output_format: str | None) -> None:
         """Run preflight checks without executing a module."""
         validate_module_id(module_id)
 
@@ -260,3 +364,28 @@ def register_validate_command(cli: click.Group, registry: Any, executor: Any) ->
         preflight = executor.validate(module_id, merged)
         format_preflight_result(preflight, output_format)
         sys.exit(0 if preflight.valid else _first_failed_exit_code(preflight))
+
+    _ = validate_cmd
+
+
+# ---------------------------------------------------------------------------
+# Back-compat batched registrar (pre-v0.7 call sites)
+# ---------------------------------------------------------------------------
+
+
+def register_discovery_commands(
+    cli: click.Group,
+    registry: Any,
+    exposure_filter: Any | None = None,
+) -> None:
+    """Legacy wrapper — delegates to the per-subcommand registrars.
+
+    Pre-FE-13 callers (the original ``register_discovery_commands``) attached
+    ``list`` + ``describe`` directly to the root Click group. FE-13 moves
+    those under the ``apcli`` group; the new canonical wiring lives in
+    :func:`apcore_cli.factory._register_apcli_subcommands`. This shim keeps
+    existing tests working by registering ``list`` + ``describe`` on the
+    group the caller passes in.
+    """
+    register_list_command(cli, registry, exposure_filter=exposure_filter)
+    register_describe_command(cli, registry)

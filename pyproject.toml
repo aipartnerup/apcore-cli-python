@@ -26,7 +26,7 @@ classifiers = [
     "Environment :: Console",
 ]
 dependencies = [
-    "apcore>=0.18.0",
+    "apcore>=0.19.0",
     "click>=8.1",
     "jsonschema>=4.20",
     "rich>=13.0",
@@ -45,7 +45,7 @@ dev = [
     "ruff>=0.1",
 ]
 toolkit = [
-    "apcore-toolkit>=0.4",
+    "apcore-toolkit>=0.5",
 ]
 
 [project.scripts]
@@ -75,6 +75,11 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+# resolver2.py is a throwaway CHANGELOG-generation helper with long markdown
+# lines embedded in a triple-quoted string; wrapping them changes rendered output.
+"resolver2.py" = ["E501"]
 
 [tool.coverage.run]
 source = ["src/apcore_cli"]

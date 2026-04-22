@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
+
 from apcore_cli.cli import (
     GroupedModuleGroup,
     LazyModuleGroup,
@@ -58,7 +59,10 @@ class TestLazyModuleGroupSkeleton:
         assert group._executor is executor
         assert group._module_cache == {}
 
-    def test_list_commands_returns_builtins(self):
+    def test_list_commands_returns_registered(self):
+        """FE-13: built-in commands live under the `apcli` group at runtime,
+        not as root-level entries on LazyModuleGroup itself. list_commands
+        returns whatever was registered via add_command."""
         registry = _make_mock_registry()
         executor = _make_mock_executor()
         group = LazyModuleGroup(
@@ -66,10 +70,12 @@ class TestLazyModuleGroupSkeleton:
             executor=executor,
             name="apcore-cli",
         )
+        # Simulate the factory registering the `apcli` group.
+        apcli = click.Group("apcli")
+        group.add_command(apcli)
         ctx = click.Context(group)
         commands = group.list_commands(ctx)
-        for builtin in ["exec", "list", "describe", "completion", "man"]:
-            assert builtin in commands
+        assert "apcli" in commands
 
     def test_list_commands_includes_modules(self):
         registry = _make_mock_registry(["math.add", "text.summarize"])
@@ -83,10 +89,10 @@ class TestLazyModuleGroupSkeleton:
         commands = group.list_commands(ctx)
         assert "math.add" in commands
         assert "text.summarize" in commands
-        # Should also have builtins
-        assert "exec" in commands
 
     def test_list_commands_registry_error(self):
+        """When registry.list() fails, list_commands degrades gracefully
+        and returns whatever was already registered instead of crashing."""
         registry = _make_mock_registry(raise_on_list=True)
         executor = _make_mock_executor()
         group = LazyModuleGroup(
@@ -94,11 +100,11 @@ class TestLazyModuleGroupSkeleton:
             executor=executor,
             name="apcore-cli",
         )
+        apcli = click.Group("apcli")
+        group.add_command(apcli)
         ctx = click.Context(group)
         commands = group.list_commands(ctx)
-        # Should still return builtins without crashing
-        assert "exec" in commands
-        assert "list" in commands
+        assert "apcli" in commands  # registered command survives the error
 
 
 class TestGetCommandAndBuild:
@@ -270,8 +276,9 @@ class TestMainEntryPoint:
     """Task 5: main() entry point and CLI integration."""
 
     def test_main_help_flag(self, tmp_path):
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path)), ["--help"])
@@ -279,8 +286,9 @@ class TestMainEntryPoint:
         assert "apcore-cli" in result.output.lower() or "apcore" in result.output.lower()
 
     def test_main_version_flag(self, tmp_path):
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path), prog_name="apcore-cli"), ["--version"])
@@ -292,6 +300,7 @@ class TestMainEntryPoint:
 
     def test_main_extensions_dir_not_found(self):
         import pytest
+
         from apcore_cli.__main__ import create_cli
 
         with pytest.raises(SystemExit) as exc_info:
@@ -299,8 +308,9 @@ class TestMainEntryPoint:
         assert exc_info.value.code == 47
 
     def test_main_extensions_dir_valid(self, tmp_path):
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         # Create a minimal extensions dir
         (tmp_path / "apcore.yaml").write_text("modules: {}\n")
@@ -314,8 +324,9 @@ class TestMainEntryPoint:
     def test_log_level_flag_takes_effect(self, tmp_path):
         import logging
 
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         original_level = logging.getLogger().level
         try:
@@ -347,8 +358,9 @@ class TestMainEntryPoint:
     def test_cli_logging_level_takes_priority_over_global(self, tmp_path, monkeypatch):
         import logging
 
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         original_level = logging.getLogger().level
         try:
@@ -366,8 +378,9 @@ class TestMainEntryPoint:
     def test_cli_logging_level_fallback_to_global(self, tmp_path, monkeypatch):
         import logging
 
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         # CLI-specific not set — must fall back to global
         monkeypatch.delenv("APCORE_CLI_LOGGING_LEVEL", raising=False)
@@ -642,14 +655,29 @@ class TestBuildGroupMap:
         group._build_group_map()  # second call — should be no-op
         assert group._group_map == first_map
 
-    def test_build_group_map_builtin_collision_warns(self, caplog):
-        # Module whose group name collides with a builtin
-        desc = _make_mock_module_def_with_display("list.items", display={"cli": {"group": "list", "alias": "items"}})
-        defs = [("list.items", desc)]
+    def test_build_group_map_reserved_name_rejected_explicit_group(self):
+        """FE-13 §4.10: module with display.cli.group='apcli' is rejected."""
+        desc = _make_mock_module_def_with_display("my.mod", display={"cli": {"group": "apcli", "alias": "foo"}})
+        defs = [("my.mod", desc)]
         group = _make_grouped_group(defs, builtins=False)
-        with caplog.at_level(logging.WARNING):
+        with pytest.raises(click.UsageError, match="reserved"):
             group._build_group_map()
-        assert "collides" in caplog.text
+
+    def test_build_group_map_reserved_name_rejected_auto_grouped(self):
+        """FE-13: module whose dotted ID auto-groups under 'apcli' is rejected."""
+        desc = _make_mock_module_def_with_display("apcli.foo")
+        defs = [("apcli.foo", desc)]
+        group = _make_grouped_group(defs, builtins=False)
+        with pytest.raises(click.UsageError, match="reserved"):
+            group._build_group_map()
+
+    def test_build_group_map_reserved_name_rejected_top_level(self):
+        """FE-13: top-level alias 'apcli' is rejected."""
+        desc = _make_mock_module_def_with_display("my_module", display={"cli": {"alias": "apcli"}})
+        defs = [("my_module", desc)]
+        group = _make_grouped_group(defs, builtins=False)
+        with pytest.raises(click.UsageError, match="reserved"):
+            group._build_group_map()
 
     def test_build_group_map_failure_allows_retry(self):
         registry = _make_mock_registry(["math.add"])
@@ -949,7 +977,6 @@ class TestVerboseHelp:
             cli_mod._verbose_help = original
 
 
-<<<<<<< ours
 class TestCreateCliWithApp:
     """Tests for the create_cli(app=...) parameter (apcore >= 0.18.0)."""
 
@@ -1037,7 +1064,8 @@ class TestCreateCliWithApp:
         assert isinstance(cli, GroupedModuleGroup)
         # The executor stored in the group should be app.executor (not a newly-constructed one)
         assert cli._executor is mock_exec
-=======
+
+
 class TestExposureInGroupedModuleGroup:
     """Task 4: ExposureFilter integration into GroupedModuleGroup."""
 
@@ -1191,4 +1219,3 @@ class TestExposureE2E:
         group = _make_grouped_group(defs, builtins=True, exposure_filter=ef)
         # The registry still has webhooks.stripe even though it's hidden from CLI
         assert group._registry.get_definition("webhooks.stripe") is not None
->>>>>>> theirs

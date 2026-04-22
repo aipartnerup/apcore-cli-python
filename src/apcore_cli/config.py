@@ -85,6 +85,27 @@ class ConfigResolver:
         # Tier 4: Default
         return self.DEFAULTS.get(key)
 
+    def resolve_object(self, key: str) -> Any:
+        """Return the subtree rooted at ``key`` from the on-disk config file.
+
+        Unlike :meth:`resolve`, this is for non-leaf keys that may evaluate to
+        a scalar, a bool, ``None``, or a nested mapping — e.g. the FE-13
+        ``apcli:`` block which can be ``true`` / ``false`` / ``null`` / object.
+
+        Lookup semantics:
+          - Scalar / bool leaf at ``<key>``: returns the value as-is.
+          - Flattened subtree under ``<key>.*``: reconstructed into a
+            one-level dict whose keys drop the ``<key>.`` prefix.
+          - Key absent everywhere: returns ``None``.
+        """
+        if self._config_file is None:
+            return None
+        if key in self._config_file:
+            return self._config_file[key]
+        prefix = f"{key}."
+        subtree = {k[len(prefix) :]: v for k, v in self._config_file.items() if k.startswith(prefix)}
+        return subtree or None
+
     def _load_config_file(self) -> dict[str, Any] | None:
         """Load and flatten a YAML config file."""
         try:

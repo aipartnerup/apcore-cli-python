@@ -6,8 +6,9 @@ import json
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-from apcore_cli.strategy import _PRESET_STEPS, _render_pipeline_table, register_pipeline_command
 from click.testing import CliRunner
+
+from apcore_cli.strategy import _PRESET_STEPS, _render_pipeline_table, register_pipeline_command
 
 
 def _make_step(name: str, pure: bool = False, removable: bool = True, timeout_ms: int | None = None) -> MagicMock:
@@ -94,7 +95,7 @@ class TestStrategyInfoPath:
     def test_strategy_info_renders_table(self) -> None:
         executor = self._make_executor_with_strategy_info()
         cli = _build_cli_with_executor(executor)
-        runner = CliRunner(mix_stderr=False)
+        runner = CliRunner()
         # CliRunner stdout is not a TTY; --format json is the default output mode.
         # Verify that the JSON output contains the expected strategy name.
         result = runner.invoke(cli, ["describe-pipeline", "--strategy", "standard", "--format", "json"])

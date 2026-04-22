@@ -18,12 +18,35 @@ from typing import Any
 
 import click
 
+from apcore_cli.builtin_group import (
+    RESERVED_GROUP_NAMES,
+    ApcliGroup,
+)
 from apcore_cli.cli import GroupedModuleGroup, set_audit_logger, set_verbose_help
 from apcore_cli.config import ConfigResolver
-from apcore_cli.discovery import register_discovery_commands
+from apcore_cli.discovery import (
+    register_describe_command,
+    register_exec_command,
+    register_list_command,
+    register_validate_command,
+)
 from apcore_cli.exposure import ExposureFilter
+from apcore_cli.init_cmd import register_init_command
 from apcore_cli.security.audit import AuditLogger
-from apcore_cli.shell import configure_man_help, register_shell_commands
+from apcore_cli.shell import (
+    configure_man_help,
+    register_completion_command,
+)
+from apcore_cli.strategy import register_pipeline_command
+from apcore_cli.system_cmd import (
+    _system_modules_available,
+    register_config_command,
+    register_disable_command,
+    register_enable_command,
+    register_health_command,
+    register_reload_command,
+    register_usage_command,
+)
 
 try:
     __version__ = _get_version("apcore-cli")
@@ -51,6 +74,7 @@ def create_cli(
     extra_commands: list[Any] | None = None,
     app: Any | None = None,
     expose: dict | ExposureFilter | None = None,
+    apcli: bool | dict | ApcliGroup | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -83,9 +107,27 @@ def create_cli(
              the app registry is empty (discovery fallthrough path).
         expose: Module exposure filter (FE-12). Accepts an ExposureFilter instance
                 or a dict that ExposureFilter.from_config can parse.
+        apcli: Built-in ``apcli`` group configuration (FE-13). Accepts:
+
+               * ``True`` / ``False`` — shorthand for ``{mode: "all"}`` /
+                 ``{mode: "none"}``.
+               * A dict matching the ``ApcliConfig`` schema
+                 (``{"mode": "...", "include": [...], "exclude": [...],
+                 "disable_env": bool}``).
+               * A pre-built :class:`~apcore_cli.builtin_group.ApcliGroup`
+                 instance (Tier 1 override; bypasses env var + yaml).
+               * ``None`` — falls back to ``apcore.yaml``'s ``apcli:`` block,
+                 then ``APCORE_CLI_APCLI`` env var, then auto-detect
+                 (standalone → visible, embedded → hidden).
     """
     if app is not None and (registry is not None or executor is not None):
         raise ValueError("app is mutually exclusive with registry/executor")
+
+    # FE-13 FR-13-13: lock in "registry was caller-injected" BEFORE filesystem
+    # discovery may assign `registry` to a freshly constructed Registry. This
+    # drives both the auto-detect default (embedded → apcli hidden) and the
+    # gating of the --extensions-dir/--commands-dir/--binding root flags.
+    registry_injected = registry is not None or app is not None
 
     if app is not None:
         registry = app.registry
@@ -307,6 +349,24 @@ def create_cli(
         else:
             exposure_filter = ExposureFilter()
 
+    # Build ApcliGroup (FE-13 §4.8) via 3-source dispatch:
+    #   1) pre-built ApcliGroup instance (pass-through),
+    #   2) CliConfig bool/dict (Tier 1 — wins over env + yaml),
+    #   3) apcore.yaml via ConfigResolver.resolve_object (Tier 3).
+    try:
+        if isinstance(apcli, ApcliGroup):
+            apcli_cfg = apcli
+        elif isinstance(apcli, bool | dict):
+            apcli_cfg = ApcliGroup.from_cli_config(apcli, registry_injected=registry_injected)
+        elif apcli is None:
+            yaml_val = config.resolve_object("apcli")
+            apcli_cfg = ApcliGroup.from_yaml(yaml_val, registry_injected=registry_injected)
+        else:
+            raise TypeError(f"apcli: expected bool, dict, ApcliGroup, or None; got {type(apcli).__name__}")
+    except TypeError as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(2)
+
     @click.group(
         cls=GroupedModuleGroup,
         registry=registry,
@@ -319,24 +379,6 @@ def create_cli(
     @click.version_option(
         version=__version__,
         prog_name=prog_name,
-    )
-    @click.option(
-        "--extensions-dir",
-        "extensions_dir_opt",
-        default=None,
-        help="Path to apcore extensions directory.",
-    )
-    @click.option(
-        "--commands-dir",
-        "commands_dir_opt",
-        default=None,
-        help="Path to convention-based commands directory.",
-    )
-    @click.option(
-        "--binding",
-        "binding_opt",
-        default=None,
-        help="Path to binding.yaml file or directory for display resolution.",
     )
     @click.option(
         "--log-level",
@@ -354,17 +396,13 @@ def create_cli(
     @click.pass_context
     def cli(
         ctx: click.Context,
-        extensions_dir_opt: str | None = None,
-        commands_dir_opt: str | None = None,
-        binding_opt: str | None = None,
         log_level: str | None = None,
         verbose_help: bool = False,
+        **_discovery_opts: Any,  # --extensions-dir/--commands-dir/--binding when standalone
     ) -> None:
         if log_level is not None:
-            # basicConfig() is a no-op once handlers exist; set level on the root logger directly.
             level = getattr(logging, log_level.upper(), logging.WARNING)
             logging.getLogger().setLevel(level)
-            # Keep apcore logger in sync: verbose when user asks for it, quiet otherwise.
             apcore_level = level if level <= logging.INFO else logging.ERROR
             logging.getLogger("apcore").setLevel(apcore_level)
         ctx.ensure_object(dict)
@@ -372,44 +410,227 @@ def create_cli(
         ctx.obj["verbose_help"] = verbose_help
         ctx.obj["exposure_filter"] = exposure_filter
 
-    # Register discovery commands (list, describe)
-    register_discovery_commands(cli, registry)
+    # FE-13 §4.1 / FR-13-13: --extensions-dir, --commands-dir, --binding are
+    # registered only in standalone mode. When a registry is injected they
+    # are inert (the discovery path doesn't run) so omitting them removes
+    # help-text noise AND surfaces a clear "unknown option" error for the
+    # rare caller who still tries them.
+    if not registry_injected:
+        cli.params.extend(
+            [
+                click.Option(
+                    ["--extensions-dir", "extensions_dir_opt"],
+                    default=None,
+                    help="Path to apcore extensions directory.",
+                ),
+                click.Option(
+                    ["--commands-dir", "commands_dir_opt"],
+                    default=None,
+                    help="Path to convention-based commands directory.",
+                    expose_value=False,
+                ),
+                click.Option(
+                    ["--binding", "binding_opt"],
+                    default=None,
+                    help="Path to binding.yaml file or directory for display resolution.",
+                    expose_value=False,
+                ),
+            ]
+        )
 
-    # Register validate command (FE-11 §3.1)
-    from apcore_cli.discovery import register_validate_command
+    # Build the apcli sub-group. `hidden` controls root --help rendering only
+    # (spec §4.1 / §4.11): the group and its subcommands remain reachable via
+    # `<cli> apcli ...` regardless.
+    apcli_group = click.Group(
+        name="apcli",
+        help="apcore-cli built-in commands.",
+        hidden=not apcli_cfg.is_group_visible(),
+    )
+    cli.add_command(apcli_group)
 
-    register_validate_command(cli, registry, executor)
+    # Dispatch the 13-entry subcommand registrar table (FE-13 §4.9).
+    _register_apcli_subcommands(
+        apcli_group,
+        apcli_cfg,
+        registry,
+        executor,
+        exposure_filter,
+        prog_name,
+    )
 
-    # Register system management commands (FE-11 §3.2) — no-op if system modules unavailable
-    from apcore_cli.system_cmd import register_system_commands
-
-    register_system_commands(cli, executor)
-
-    # Register pipeline introspection command (FE-11 §3.8)
-    from apcore_cli.strategy import register_pipeline_command
-
-    register_pipeline_command(cli, executor)
-
-    # Register shell integration commands
-    register_shell_commands(cli, prog_name=prog_name)
-
-    # Register --help --man support
+    # Root-level --help --man support (stays at root per spec §4.1).
     configure_man_help(cli, prog_name, __version__)
 
-    # Register init scaffolding command
-    from apcore_cli.init_cmd import register_init_command
+    # FE-13 §11.2 deprecation shims — standalone mode only. Embedded
+    # integrators' end users never see apcore-cli deprecation warnings.
+    if not registry_injected:
+        _register_deprecation_shims(cli, apcli_group, prog_name)
 
-    register_init_command(cli)
-
-    # Register extra commands from downstream projects (FE-11 §3.11)
+    # Extra commands from downstream projects (FE-11 §3.11). Reserved-name
+    # (`apcli`) collisions are hard-rejected. Collisions with deprecation
+    # shims yield to the user-supplied command (shim is dropped with a warning)
+    # — shims are transitional scaffolding, not a real collision.
     if extra_commands:
-        from apcore_cli.cli import BUILTIN_COMMANDS
-
         for cmd in extra_commands:
             cmd_name = getattr(cmd, "name", None)
-            if cmd_name and cmd_name in BUILTIN_COMMANDS:
-                msg = f"Extra command '{cmd_name}' conflicts with built-in command."
+            if cmd_name and cmd_name in RESERVED_GROUP_NAMES:
+                msg = f"Extra command '{cmd_name}' is reserved."
                 raise ValueError(msg)
+            if cmd_name and cmd_name in cli.commands:
+                existing = cli.commands[cmd_name]
+                if getattr(existing, "__is_deprecation_shim__", False):
+                    logger.warning(
+                        "extra_commands '%s' overrides the deprecation shim for the same name.",
+                        cmd_name,
+                    )
+                    del cli.commands[cmd_name]
+                else:
+                    msg = f"Extra command '{cmd_name}' conflicts with an existing command."
+                    raise ValueError(msg)
             cli.add_command(cmd)
 
     return cli
+
+
+# ---------------------------------------------------------------------------
+# FE-13 apcli subcommand dispatcher (§4.9)
+# ---------------------------------------------------------------------------
+
+
+_ALWAYS_REGISTERED: frozenset[str] = frozenset({"exec"})
+
+
+def _register_apcli_subcommands(
+    apcli_group: click.Group,
+    apcli_cfg: ApcliGroup,
+    registry: Any,
+    executor: Any,
+    exposure_filter: ExposureFilter,
+    prog_name: str,
+) -> None:
+    """Register the 13 canonical apcli subcommands, filtered by visibility.
+
+    Mirrors ``_registerApcliSubcommands`` in
+    ``../apcore-cli-typescript/src/main.ts``. Each entry declares whether it
+    ``requires_executor``; when the executor is missing, the entry is skipped
+    silently (unless it's in :data:`_ALWAYS_REGISTERED` — in that case a WARN
+    is emitted since spec §4.9 guarantees registration).
+    """
+
+    # Build system-subcommand registrars only when the executor's registry
+    # carries `system.*` modules. Outside standalone+system-modules deploys,
+    # invoking the subcommands would error at runtime with an opaque message;
+    # probing here keeps `<cli> apcli --help` lean in the common case.
+    system_available = executor is not None and _system_modules_available(executor)
+
+    # Each entry: (name, requires_executor, callable that registers the
+    # subcommand on apcli_group). The apcli_group is captured per entry.
+    registrars: list[tuple[str, bool, Any]] = [
+        ("list", False, lambda: register_list_command(apcli_group, registry, exposure_filter)),
+        ("describe", False, lambda: register_describe_command(apcli_group, registry)),
+        ("exec", True, lambda: register_exec_command(apcli_group, registry, executor)),
+        ("validate", True, lambda: register_validate_command(apcli_group, registry, executor)),
+        ("init", False, lambda: register_init_command(apcli_group)),
+        ("health", True, lambda: register_health_command(apcli_group, executor) if system_available else None),
+        ("usage", True, lambda: register_usage_command(apcli_group, executor) if system_available else None),
+        ("enable", True, lambda: register_enable_command(apcli_group, executor) if system_available else None),
+        ("disable", True, lambda: register_disable_command(apcli_group, executor) if system_available else None),
+        ("reload", True, lambda: register_reload_command(apcli_group, executor) if system_available else None),
+        ("config", True, lambda: register_config_command(apcli_group, executor) if system_available else None),
+        ("completion", False, lambda: register_completion_command(apcli_group, prog_name=prog_name)),
+        ("describe-pipeline", True, lambda: register_pipeline_command(apcli_group, executor)),
+    ]
+
+    mode = apcli_cfg.resolve_visibility()
+    for name, requires_executor, registrar in registrars:
+        # Decide whether this entry registers. Compute BEFORE the
+        # missing-executor skip so _ALWAYS_REGISTERED is honored even when
+        # its requires_executor flag is True — missing executor then warns
+        # rather than silently drops (spec §4.9).
+        if mode in ("all", "none"):
+            should_register = True
+        else:
+            should_register = name in _ALWAYS_REGISTERED or apcli_cfg.is_subcommand_included(name)
+        if not should_register:
+            continue
+
+        if requires_executor and executor is None:
+            if name in _ALWAYS_REGISTERED:
+                logger.warning(
+                    "apcli.%s is always-registered but no executor is wired — "
+                    "subcommand unavailable. Pass executor to create_cli().",
+                    name,
+                )
+            continue
+
+        registrar()
+
+
+# ---------------------------------------------------------------------------
+# FE-13 §11.2 deprecation shims (standalone-mode only)
+# ---------------------------------------------------------------------------
+
+
+_DEPRECATED_ROOT_COMMANDS: tuple[str, ...] = (
+    "list",
+    "describe",
+    "exec",
+    "init",
+    "validate",
+    "health",
+    "usage",
+    "enable",
+    "disable",
+    "reload",
+    "config",
+    "completion",
+    "describe-pipeline",
+)
+
+
+def _register_deprecation_shims(
+    root: click.Group,
+    apcli_group: click.Group,
+    prog_name: str,
+) -> None:
+    """Register thin root-level shims that forward to the ``apcli`` subcommand.
+
+    Each shim writes the spec §11.2 warning to stderr then re-enters Click's
+    dispatch loop on the ``apcli <name>`` path, preserving positional args +
+    options. The shim is tagged with ``__is_deprecation_shim__ = True`` so
+    ``extra_commands`` can override without raising a collision error.
+    """
+
+    def _make_shim(name: str, sub: click.Command) -> click.Command:
+        @click.command(
+            name=name,
+            context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+            help=f"[DEPRECATED] Use '{prog_name} apcli {name}' instead.",
+            hidden=True,
+            add_help_option=False,
+        )
+        @click.pass_context
+        def shim(ctx: click.Context) -> None:
+            click.echo(
+                f"WARNING: '{name}' as a root-level command is deprecated. "
+                f"Use '{prog_name} apcli {name}' instead.\n"
+                f"         Will be removed in v0.8. See: "
+                f"https://aiperceivable.github.io/apcore-cli/features/builtin-group/#11-migration",
+                err=True,
+            )
+            # Forward remaining args to the apcli subcommand's own invocation
+            # path so nested sub-subcommands (`config get foo`) route correctly.
+            tail = list(ctx.args)
+            sub.main(args=tail, prog_name=f"{prog_name} apcli {name}", standalone_mode=False)
+
+        # Tag so extra_commands can recognize and replace shims.
+        shim.__is_deprecation_shim__ = True  # type: ignore[attr-defined]
+        return shim
+
+    for name in _DEPRECATED_ROOT_COMMANDS:
+        sub = apcli_group.commands.get(name)
+        if sub is None:
+            continue
+        if name in root.commands:
+            continue
+        root.add_command(_make_shim(name, sub))

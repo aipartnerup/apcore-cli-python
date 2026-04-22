@@ -1,4 +1,16 @@
-"""System management commands — health, usage, enable, disable, reload, config (FE-11)."""
+"""System management commands — health, usage, enable, disable, reload, config (FE-11, FE-13).
+
+FE-13 §4.9 split the batched ``register_system_commands`` into six
+per-subcommand registrars (``register_health_command`` … ``register_config_command``).
+The per-command shape is required for apcli include/exclude filtering —
+the factory dispatcher decides per-entry whether to attach to the
+``apcli`` group.
+
+The legacy :func:`register_system_commands` remains as a thin wrapper for
+pre-v0.7 call sites; it probes the executor for ``system.*`` modules and
+skips attachment when they are absent, preserving the old "no-op if system
+modules unavailable" behavior.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +48,19 @@ def _check_system_approval(executor: Any, module_id: str, auto_approve: bool) ->
         pass
 
 
+def _system_modules_available(executor: Any) -> bool:
+    """Probe the executor for ``system.health.summary`` without executing it."""
+    try:
+        if hasattr(executor, "validate"):
+            executor.validate("system.health.summary", {})
+            return True
+        if hasattr(executor, "_registry"):
+            return executor._registry.get_definition("system.health.summary") is not None
+    except Exception:
+        return False
+    return False
+
+
 def _format_health_summary_tty(result: dict[str, Any]) -> None:
     """Render health summary as a TTY table."""
     summary = result.get("summary", {})
@@ -50,7 +75,7 @@ def _format_health_summary_tty(result: dict[str, Any]) -> None:
     click.echo(f"  {'-' * 28} {'-' * 12} {'-' * 12} {'-' * 20}")
     for m in modules:
         top = m.get("top_error")
-        top_str = f"{top['code']} ({top.get('count', '?')})" if top else "\u2014"
+        top_str = f"{top['code']} ({top.get('count', '?')})" if top else "—"
         rate = f"{m.get('error_rate', 0) * 100:.1f}%"
         click.echo(f"  {m['module_id']:<28} {m['status']:<12} {rate:<12} {top_str}")
 
@@ -107,24 +132,15 @@ def _format_usage_summary_tty(result: dict[str, Any]) -> None:
     click.echo(f"\nTotal: {total_calls:,} calls | {total_errors:,} errors")
 
 
-def register_system_commands(cli: click.Group, executor: Any) -> None:
-    """Register system management commands. No-op if system modules are not available."""
-    # Probe: check if system modules exist (no side effects — never call())
-    try:
-        if hasattr(executor, "validate"):
-            executor.validate("system.health.summary", {})
-        elif hasattr(executor, "_registry"):
-            # Fall back to registry lookup — pure read, no execution
-            if executor._registry.get_definition("system.health.summary") is None:
-                raise LookupError("system.health.summary not registered")
-        else:
-            logger.debug("Cannot probe for system modules; skipping registration.")
-            return
-    except Exception:
-        logger.debug("System modules not available; skipping system command registration.")
-        return
+# ---------------------------------------------------------------------------
+# Per-subcommand registrars (FE-13 §4.9)
+# ---------------------------------------------------------------------------
 
-    @cli.command("health")
+
+def register_health_command(apcli_group: click.Group, executor: Any) -> None:
+    """Register the ``health`` subcommand on the given group."""
+
+    @apcli_group.command("health")
     @click.argument("module_id", required=False)
     @click.option("--threshold", type=float, default=0.01, help="Error rate threshold (default: 0.01).")
     @click.option("--all", "include_all", is_flag=True, default=False, help="Include healthy modules.")
@@ -164,7 +180,13 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
-    @cli.command("usage")
+    _ = health_cmd
+
+
+def register_usage_command(apcli_group: click.Group, executor: Any) -> None:
+    """Register the ``usage`` subcommand on the given group."""
+
+    @apcli_group.command("usage")
     @click.argument("module_id", required=False)
     @click.option("--period", default="24h", help="Time window: 1h, 24h, 7d, 30d (default: 24h).")
     @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
@@ -194,7 +216,13 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
-    @cli.command("enable")
+    _ = usage_cmd
+
+
+def register_enable_command(apcli_group: click.Group, executor: Any) -> None:
+    """Register the ``enable`` subcommand on the given group."""
+
+    @apcli_group.command("enable")
     @click.argument("module_id")
     @click.option("--reason", required=True, help="Reason for enabling (required for audit).")
     @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
@@ -217,7 +245,13 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
-    @cli.command("disable")
+    _ = enable_cmd
+
+
+def register_disable_command(apcli_group: click.Group, executor: Any) -> None:
+    """Register the ``disable`` subcommand on the given group."""
+
+    @apcli_group.command("disable")
     @click.argument("module_id")
     @click.option("--reason", required=True, help="Reason for disabling (required for audit).")
     @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
@@ -240,7 +274,13 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
-    @cli.command("reload")
+    _ = disable_cmd
+
+
+def register_reload_command(apcli_group: click.Group, executor: Any) -> None:
+    """Register the ``reload`` subcommand on the given group."""
+
+    @apcli_group.command("reload")
     @click.argument("module_id")
     @click.option("--reason", required=True, help="Reason for reload (required for audit).")
     @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
@@ -268,7 +308,13 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
-    @cli.group("config")
+    _ = reload_cmd
+
+
+def register_config_command(apcli_group: click.Group, executor: Any) -> None:
+    """Register the ``config`` subgroup (``get`` / ``set``) on the given group."""
+
+    @apcli_group.group("config")
     def config_group() -> None:
         """Read or update runtime configuration."""
 
@@ -293,7 +339,6 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
     def config_set_cmd(key: str, value: str, reason: str, output_format: str | None) -> None:
         """Update a runtime configuration value (requires approval)."""
         fmt = resolve_format(output_format)
-        # Attempt to parse value as JSON for typed values
         try:
             parsed_value = json.loads(value)
         except (json.JSONDecodeError, ValueError):
@@ -316,3 +361,31 @@ def register_system_commands(cli: click.Group, executor: Any) -> None:
         except Exception as e:
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
+
+    _ = config_get_cmd
+    _ = config_set_cmd
+
+
+# ---------------------------------------------------------------------------
+# Back-compat batched registrar (pre-v0.7 call sites)
+# ---------------------------------------------------------------------------
+
+
+def register_system_commands(cli: click.Group, executor: Any) -> None:
+    """Legacy wrapper — registers all six system subcommands on the given group.
+
+    Probes the executor for ``system.*`` modules and silently skips
+    registration if they are unavailable, matching the pre-FE-13 behavior.
+    Post-FE-13 canonical wiring attaches each subcommand individually to
+    the ``apcli`` group via the :mod:`apcore_cli.factory` dispatcher.
+    """
+    if not _system_modules_available(executor):
+        logger.debug("System modules not available; skipping system command registration.")
+        return
+
+    register_health_command(cli, executor)
+    register_usage_command(cli, executor)
+    register_enable_command(cli, executor)
+    register_disable_command(cli, executor)
+    register_reload_command(cli, executor)
+    register_config_command(cli, executor)

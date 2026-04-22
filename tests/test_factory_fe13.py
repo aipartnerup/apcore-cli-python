@@ -1,0 +1,194 @@
+"""Coverage-focused tests for FE-13 factory edges not hit by other suites.
+
+Covers:
+  * ``create_cli(apcli=...)`` TypeError branch (non-bool/dict/None/ApcliGroup)
+  * Pre-built :class:`ApcliGroup` instance passthrough
+  * Filesystem-discovery error paths (missing / unreadable extensions dir)
+  * ``_register_apcli_subcommands`` missing-executor behavior for the
+    always-registered ``exec`` subcommand (spec §4.9 WARN, not silent drop)
+  * Deprecation shim runtime forwarding (standalone mode)
+  * ``extra_commands`` shim-override runtime invocation
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+import subprocess
+import sys
+from unittest.mock import MagicMock
+
+import click
+import pytest
+
+from apcore_cli.builtin_group import ApcliGroup
+from apcore_cli.factory import create_cli
+
+EXIT_CONFIG_NOT_FOUND = 47
+
+
+# ---------------------------------------------------------------------------
+# apcli kwarg edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestApcliKwargEdges:
+    def test_invalid_apcli_type_exits_2(self, capsys):
+        """create_cli(apcli='yes') → TypeError wrapped as exit 2."""
+        with pytest.raises(SystemExit) as exc:
+            create_cli(registry=MagicMock(), executor=MagicMock(), apcli="yes")  # type: ignore[arg-type]
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "expected bool, dict, ApcliGroup, or None" in err
+
+    def test_apcli_group_instance_passthrough(self):
+        """ApcliGroup instance is used as-is (Tier 1 carried in flag)."""
+        g = ApcliGroup.from_cli_config({"mode": "none"}, registry_injected=True)
+        cli = create_cli(registry=MagicMock(), executor=MagicMock(), apcli=g)
+        assert cli.commands["apcli"].hidden is True
+
+
+# ---------------------------------------------------------------------------
+# Filesystem-discovery error paths (standalone mode)
+# ---------------------------------------------------------------------------
+
+
+class TestExtensionsDirErrors:
+    def test_missing_extensions_dir_exits_47(self, tmp_path, capsys):
+        missing = tmp_path / "does-not-exist"
+        with pytest.raises(SystemExit) as exc:
+            create_cli(extensions_dir=str(missing), prog_name="apcore-cli")
+        assert exc.value.code == EXIT_CONFIG_NOT_FOUND
+        err = capsys.readouterr().err
+        assert "not found" in err
+
+    def test_unreadable_extensions_dir_exits_47(self, tmp_path, capsys, monkeypatch):
+        unreadable = tmp_path / "locked"
+        unreadable.mkdir()
+        # Make os.access report False for R_OK to trigger the unreadable branch
+        # without actually touching permissions on the real dir.
+        real_access = os.access
+
+        def fake_access(path, mode):
+            if str(path) == str(unreadable):
+                return False
+            return real_access(path, mode)
+
+        monkeypatch.setattr("apcore_cli.factory.os.access", fake_access)
+        with pytest.raises(SystemExit) as exc:
+            create_cli(extensions_dir=str(unreadable), prog_name="apcore-cli")
+        assert exc.value.code == EXIT_CONFIG_NOT_FOUND
+        err = capsys.readouterr().err
+        assert "Cannot read" in err
+
+
+# ---------------------------------------------------------------------------
+# _register_apcli_subcommands edges
+# ---------------------------------------------------------------------------
+
+
+class TestRegisterApcliSubcommandsEdges:
+    def test_always_registered_exec_warns_without_executor(self, caplog):
+        """Spec §4.9: exec is _ALWAYS_REGISTERED; missing executor → WARN."""
+        # We need a real-ish call: standalone mode with no executor wired via
+        # the public API is not reachable (factory always builds one). Drive
+        # the dispatcher directly instead.
+        from apcore_cli.builtin_group import ApcliGroup
+        from apcore_cli.exposure import ExposureFilter
+        from apcore_cli.factory import _register_apcli_subcommands
+
+        apcli_group = click.Group("apcli")
+        cfg = ApcliGroup.from_cli_config(True, registry_injected=True)
+        registry = MagicMock()
+        registry.list.return_value = []
+        with caplog.at_level(logging.WARNING, logger="apcore_cli"):
+            _register_apcli_subcommands(
+                apcli_group,
+                cfg,
+                registry=registry,
+                executor=None,  # trigger the WARN path
+                exposure_filter=ExposureFilter(),
+                prog_name="test-cli",
+            )
+        assert "exec" in caplog.text
+        assert "no executor is wired" in caplog.text
+        # exec itself is NOT registered when executor is None (WARN, not silent
+        # drop — but the subcommand cannot be built without the executor).
+        assert "exec" not in apcli_group.commands
+
+
+# ---------------------------------------------------------------------------
+# Deprecation shim runtime behavior (standalone mode)
+# ---------------------------------------------------------------------------
+
+
+class TestDeprecationShimRuntime:
+    def test_shim_forwards_and_warns(self, tmp_path):
+        """Root `apcore-cli list` writes deprecation warning + forwards to `apcli list`."""
+        env = os.environ.copy()
+        env.pop("APCORE_CLI_APCLI", None)
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "apcore_cli",
+                "--extensions-dir",
+                str(tmp_path),
+                "list",
+                "--flat",
+                "--format",
+                "json",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=env,
+        )
+        assert result.returncode == 0, result.stderr
+        assert "deprecated" in result.stderr.lower()
+        assert "apcli list" in result.stderr
+        # Forwarded output should be JSON (empty list when no modules).
+        assert result.stdout.strip() in ("[]", "")
+
+
+# ---------------------------------------------------------------------------
+# extra_commands override behavior (runtime)
+# ---------------------------------------------------------------------------
+
+
+class TestExtraCommandsRuntime:
+    def test_extra_command_override_runs_instead_of_shim(self, tmp_path, caplog):
+        """extra_command named 'list' replaces the deprecation shim wholesale."""
+        from click.testing import CliRunner
+
+        @click.command("list")
+        def user_list() -> None:
+            click.echo("user-list-was-called")
+
+        with caplog.at_level(logging.WARNING, logger="apcore_cli"):
+            cli = create_cli(
+                extensions_dir=str(tmp_path),
+                prog_name="apcore-cli",
+                extra_commands=[user_list],
+            )
+        # Override WARN got emitted by the factory.
+        assert "overrides the deprecation shim" in caplog.text
+        # The user command wins — no deprecation warning is printed.
+        result = CliRunner().invoke(cli, ["list"])
+        assert result.exit_code == 0
+        assert "user-list-was-called" in result.output
+        assert "deprecated" not in result.output.lower()
+
+    def test_extra_command_collides_with_non_shim(self, tmp_path):
+        """Non-shim collision (with the `apcli` group itself) → ValueError."""
+
+        @click.command("apcli")
+        def rogue() -> None:
+            pass
+
+        with pytest.raises(ValueError, match="reserved"):
+            create_cli(
+                extensions_dir=str(tmp_path),
+                prog_name="apcore-cli",
+                extra_commands=[rogue],
+            )

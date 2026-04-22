@@ -13,11 +13,19 @@ import click
 import jsonschema
 
 from apcore_cli.approval import check_approval
+from apcore_cli.builtin_group import RESERVED_GROUP_NAMES as RESERVED_GROUP_NAMES  # noqa: PLC0414
 from apcore_cli.display_helpers import get_display as _get_display
 from apcore_cli.output import format_exec_result
 from apcore_cli.ref_resolver import resolve_refs
 from apcore_cli.schema_parser import reconvert_enum_values, schema_to_click_options
 from apcore_cli.security.sandbox import Sandbox
+
+# FE-13 §11.4: ``BUILTIN_COMMANDS`` was retired in v0.7.0. All apcore-cli-provided
+# commands now live under the single reserved ``apcli`` group, so the only
+# collision surface is the group name itself (see ``RESERVED_GROUP_NAMES`` above,
+# imported from :mod:`apcore_cli.builtin_group`). Stale ``from apcore_cli.cli
+# import BUILTIN_COMMANDS`` imports will fail at import time rather than drift
+# silently — intentional per spec §11.4.
 
 if TYPE_CHECKING:
     from apcore import Executor, Registry
@@ -26,29 +34,6 @@ if TYPE_CHECKING:
     from apcore_cli.security.audit import AuditLogger
 
 logger = logging.getLogger("apcore_cli.cli")
-
-# BUILTIN_COMMANDS is a manually-maintained list of command names that are
-# registered by create_cli() before any module-derived commands are added.
-# It cannot be derived programmatically at import time because the commands
-# are registered lazily at CLI-build time (inside create_cli()), and this
-# constant is needed during that build to detect name collisions. If you
-# add or remove a built-in command in __main__.py, update this list too.
-BUILTIN_COMMANDS = [
-    "completion",
-    "config",
-    "describe",
-    "describe-pipeline",
-    "disable",
-    "enable",
-    "exec",
-    "health",
-    "init",
-    "list",
-    "man",
-    "reload",
-    "usage",
-    "validate",
-]
 
 # Module-level audit logger, set during CLI init
 _audit_logger: AuditLogger | None = None
@@ -163,17 +148,19 @@ class LazyModuleGroup(click.Group):
             logger.warning("Failed to build alias map from registry")
 
     def list_commands(self, ctx: click.Context) -> list[str]:
-        builtin = list(BUILTIN_COMMANDS)
+        # Root-level commands are whatever the factory has registered
+        # (post-FE-13: the `apcli` group + any deprecation shims + caller
+        # extras). Module-derived commands live on top of those.
+        registered = [name for name, cmd in self.commands.items() if not cmd.hidden]
         try:
             self._build_alias_map()
-            # Reverse map: module_id → cli alias (if any)
             reverse: dict[str, str] = {v: k for k, v in self._alias_map.items()}
             module_ids = self._registry.list()
             names = [reverse.get(mid, mid) for mid in module_ids]
         except Exception:
             logger.warning("Failed to list modules from registry")
             names = []
-        return sorted(set(builtin + names))
+        return sorted(set(registered + names))
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         # Check built-in commands first
@@ -246,6 +233,10 @@ class GroupedModuleGroup(LazyModuleGroup):
 
         Applies the exposure filter before building groups — hidden modules are
         excluded from --help and tab-completion but remain invocable via exec.
+
+        FE-13 §4.10: rejects modules whose explicit group name, dotted-ID
+        auto-extracted group, or top-level CLI name is ``apcli`` (reserved).
+        Rejection is a hard :class:`click.UsageError` — exit 2 at import time.
         """
         if self._group_map_built:
             return
@@ -255,13 +246,25 @@ class GroupedModuleGroup(LazyModuleGroup):
                 descriptor = self._descriptor_cache.get(module_id)
                 if descriptor is None:
                     continue
-<<<<<<< HEAD
                 # Skip modules that should not appear as CLI commands (FE-12).
-=======
->>>>>>> 53ee43d3d6413c18c9b931fb5233de8ddcd693dd
                 if not self._exposure_filter.is_exposed(module_id):
                     continue
                 group, cmd = self._resolve_group(module_id, descriptor)
+                # FE-13: reserved-name enforcement covers all three collision
+                # shapes — explicit group, auto-grouped from dotted module_id,
+                # and top-level CLI name. Raised as UsageError so Click exits
+                # with code 2 per spec §7 FR-13-09. UsageError must propagate
+                # past the below try/except so test fixtures and live CLI see
+                # the intended failure path.
+                if group is not None and group in RESERVED_GROUP_NAMES:
+                    raise click.UsageError(
+                        f"Module '{module_id}': group name '{group}' is reserved. "
+                        f"Use a different CLI alias or set display.cli.group to another value."
+                    )
+                if group is None and cmd in RESERVED_GROUP_NAMES:
+                    raise click.UsageError(
+                        f"Module '{module_id}': top-level CLI name '{cmd}' is reserved. Use a different CLI alias."
+                    )
                 if group is None:
                     self._top_level_modules[cmd] = (module_id, descriptor)
                 elif not re.fullmatch(r"[a-z][a-z0-9_-]*", group):
@@ -273,24 +276,22 @@ class GroupedModuleGroup(LazyModuleGroup):
                     self._top_level_modules[cmd] = (module_id, descriptor)
                 else:
                     self._group_map.setdefault(group, {})[cmd] = (module_id, descriptor)
-            for group_name in self._group_map:
-                if group_name in BUILTIN_COMMANDS:
-                    logger.warning(
-                        "Group name '%s' collides with a built-in command and will be ignored",
-                        group_name,
-                    )
             self._group_map_built = True
+        except click.UsageError:
+            raise
         except Exception:
+            # Transient registry errors — allow retry on next call.
             logger.warning("Failed to build group map")
 
     def list_commands(self, ctx: click.Context) -> list[str]:
-        builtin = list(BUILTIN_COMMANDS)
         self._build_group_map()
-        group_names = [g for g in self._group_map if g not in BUILTIN_COMMANDS]
+        # Registered root commands (post-FE-13: `apcli` group + deprecation
+        # shims + caller extras). Hidden entries (e.g. the apcli group when
+        # mode=none) are filtered out so tab-completion matches --help.
+        registered = [name for name, cmd in self.commands.items() if not cmd.hidden]
+        group_names = list(self._group_map.keys())
         top_names = list(self._top_level_modules.keys())
-        # Include any commands added via add_command() (e.g., downstream project commands)
-        extra = [n for n in self.commands if n not in BUILTIN_COMMANDS]
-        return sorted(set(builtin + group_names + top_names + extra))
+        return sorted(set(registered + group_names + top_names))
 
     def get_command(self, ctx: click.Context, cmd_name: str) -> click.Command | None:
         # Check built-in commands first
@@ -347,21 +348,19 @@ class GroupedModuleGroup(LazyModuleGroup):
             with formatter.section("Options"):
                 formatter.write_dl(opts)
 
-        # Commands section (builtins + extra commands added via add_command)
-        builtin_names = set(BUILTIN_COMMANDS)
-        builtin_records = []
-        extra_records = []
+        # Commands section. Post-FE-13, all apcore-cli built-ins live under
+        # the `apcli` group — at root we only show non-hidden registered
+        # commands (the apcli group itself when visible, help, and any
+        # user-added extras via extra_commands / add_command).
+        cmd_records = []
         for name in sorted(self.commands):
             cmd = self.commands[name]
-            help_text = cmd.get_short_help_str() if cmd else ""
-            if name in builtin_names:
-                builtin_records.append((name, help_text))
-            else:
-                extra_records.append((name, help_text))
-        all_cmd_records = extra_records + builtin_records
-        if all_cmd_records:
+            if cmd is None or cmd.hidden:
+                continue
+            cmd_records.append((name, cmd.get_short_help_str()))
+        if cmd_records:
             with formatter.section("Commands"):
-                formatter.write_dl(all_cmd_records)
+                formatter.write_dl(cmd_records)
 
         # Modules section (top-level)
         if self._top_level_modules:
@@ -373,12 +372,12 @@ class GroupedModuleGroup(LazyModuleGroup):
             with formatter.section("Modules"):
                 formatter.write_dl(module_records)
 
-        # Groups section
+        # Groups section (business-module-derived groups only — the `apcli`
+        # reserved group was rejected in _build_group_map, so filtering here
+        # is defensive rather than load-bearing).
         if self._group_map:
             group_records = []
             for group_name in sorted(self._group_map.keys()):
-                if group_name in BUILTIN_COMMANDS:
-                    continue
                 count = len(self._group_map[group_name])
                 suffix = "s" if count != 1 else ""
                 group_records.append((group_name, f"({count} command{suffix})"))

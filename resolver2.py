@@ -1,9 +1,10 @@
 import re
 
+
 def resolve_changelog():
-    with open("CHANGELOG.md", "r") as f:
+    with open("CHANGELOG.md") as f:
         src = f.read()
-    
+
     new_block = """## [0.7.0] - 2026-04-15
 
 ### Changed

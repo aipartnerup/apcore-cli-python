@@ -1,6 +1,7 @@
 """Tests for $ref resolver (FE-02)."""
 
 import pytest
+
 from apcore_cli.ref_resolver import resolve_refs
 
 

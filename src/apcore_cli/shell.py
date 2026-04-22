@@ -573,10 +573,10 @@ def configure_man_help(
         sys.exit(0)
 
 
-def register_shell_commands(cli: click.Group, prog_name: str = "apcore-cli") -> None:
-    """Register completion and man commands."""
+def register_completion_command(apcli_group: click.Group, prog_name: str = "apcore-cli") -> None:
+    """Register the ``completion`` subcommand on the given group (FE-13)."""
 
-    @cli.command("completion")
+    @apcli_group.command("completion")
     @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
     @click.pass_context
     def completion_cmd(ctx: click.Context, shell: str) -> None:
@@ -595,6 +595,19 @@ def register_shell_commands(cli: click.Group, prog_name: str = "apcore-cli") -> 
             "fish": lambda: _generate_fish_completion(resolved),
         }
         click.echo(generators[shell]())
+
+    _ = completion_cmd
+
+
+def register_shell_commands(cli: click.Group, prog_name: str = "apcore-cli") -> None:
+    """Legacy wrapper — registers ``completion`` and ``man`` on the given group.
+
+    FE-13 canonical wiring attaches ``completion`` to the ``apcli`` group via
+    :func:`register_completion_command`; ``man`` remains at the root per
+    spec §4.1 (meta-commands stay at root). This shim preserves the pre-v0.7
+    flat shape for existing tests.
+    """
+    register_completion_command(cli, prog_name=prog_name)
 
     @cli.command("man")
     @click.argument("command")

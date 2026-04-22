@@ -1,6 +1,8 @@
 """Tests for Shell Integration (FE-06)."""
 
 import click
+from click.testing import CliRunner
+
 from apcore_cli.shell import (
     _generate_bash_completion,
     _generate_fish_completion,
@@ -9,7 +11,6 @@ from apcore_cli.shell import (
     configure_man_help,
     register_shell_commands,
 )
-from click.testing import CliRunner
 
 _PROG = "apcore-cli"
 
