@@ -60,9 +60,11 @@ class TestApplyToolkitIntegration:
         fake_writer.write.return_value = []
         fake_writer_cls = MagicMock(return_value=fake_writer)
 
-        with patch("apcore_toolkit.BindingLoader", fake_loader_cls), patch(
-            "apcore_toolkit.DisplayResolver", fake_resolver_cls
-        ), patch("apcore_toolkit.RegistryWriter", fake_writer_cls):
+        with (
+            patch("apcore_toolkit.BindingLoader", fake_loader_cls),
+            patch("apcore_toolkit.DisplayResolver", fake_resolver_cls),
+            patch("apcore_toolkit.RegistryWriter", fake_writer_cls),
+        ):
             registry = MagicMock()
             _apply_toolkit_integration(
                 registry,
@@ -89,9 +91,11 @@ class TestApplyToolkitIntegration:
         fake_writer = MagicMock()
         fake_writer.write.return_value = []
 
-        with patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)), patch(
-            "apcore_toolkit.DisplayResolver", MagicMock(return_value=MagicMock(resolve=lambda m, **kw: m))
-        ), patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)):
+        with (
+            patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)),
+            patch("apcore_toolkit.DisplayResolver", MagicMock(return_value=MagicMock(resolve=lambda m, **kw: m))),
+            patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)),
+        ):
             _apply_toolkit_integration(
                 MagicMock(),
                 commands_dir=None,
@@ -116,12 +120,11 @@ class TestApplyToolkitIntegration:
         fake_writer = MagicMock()
         fake_writer.write.return_value = []
 
-        with patch("apcore_toolkit.convention_scanner.ConventionScanner", fake_scanner_cls), patch(
-            "apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)
-        ), patch(
-            "apcore_toolkit.DisplayResolver", MagicMock(return_value=MagicMock(resolve=lambda m, **kw: m))
-        ), patch(
-            "apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)
+        with (
+            patch("apcore_toolkit.convention_scanner.ConventionScanner", fake_scanner_cls),
+            patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)),
+            patch("apcore_toolkit.DisplayResolver", MagicMock(return_value=MagicMock(resolve=lambda m, **kw: m))),
+            patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)),
         ):
             _apply_toolkit_integration(
                 MagicMock(),
@@ -146,8 +149,9 @@ class TestApplyToolkitIntegration:
                 raise ImportError("no toolkit")
             return real_import(name, *args, **kw)
 
-        with caplog.at_level(pylogging.WARNING, logger="apcore_cli"), patch(
-            "builtins.__import__", side_effect=fail_toolkit
+        with (
+            caplog.at_level(pylogging.WARNING, logger="apcore_cli"),
+            patch("builtins.__import__", side_effect=fail_toolkit),
         ):
             _apply_toolkit_integration(
                 MagicMock(),
@@ -171,8 +175,9 @@ class TestApplyToolkitIntegration:
                 raise ImportError("BindingLoader not in 0.4.x")
             return real_import(name, globals_, locals_, fromlist, level)
 
-        with caplog.at_level(pylogging.WARNING, logger="apcore_cli"), patch(
-            "builtins.__import__", side_effect=partial_import
+        with (
+            caplog.at_level(pylogging.WARNING, logger="apcore_cli"),
+            patch("builtins.__import__", side_effect=partial_import),
         ):
             _apply_toolkit_integration(
                 MagicMock(),
@@ -186,16 +191,17 @@ class TestApplyToolkitIntegration:
         """BindingLoader.load() raises → WARN, don't crash create_cli."""
         import logging as pylogging
 
-        class Boom(Exception):
+        class BoomError(Exception):
             pass
 
         fake_loader = MagicMock()
-        fake_loader.load.side_effect = Boom("malformed yaml")
+        fake_loader.load.side_effect = BoomError("malformed yaml")
 
-        with caplog.at_level(pylogging.WARNING, logger="apcore_cli"), patch(
-            "apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)
-        ), patch("apcore_toolkit.DisplayResolver", MagicMock()), patch(
-            "apcore_toolkit.RegistryWriter", MagicMock()
+        with (
+            caplog.at_level(pylogging.WARNING, logger="apcore_cli"),
+            patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)),
+            patch("apcore_toolkit.DisplayResolver", MagicMock()),
+            patch("apcore_toolkit.RegistryWriter", MagicMock()),
         ):
             _apply_toolkit_integration(
                 MagicMock(),
@@ -212,9 +218,11 @@ class TestApplyToolkitIntegration:
 
         fake_writer = MagicMock()
 
-        with patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)), patch(
-            "apcore_toolkit.DisplayResolver", MagicMock()
-        ), patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)):
+        with (
+            patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)),
+            patch("apcore_toolkit.DisplayResolver", MagicMock()),
+            patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)),
+        ):
             _apply_toolkit_integration(
                 MagicMock(),
                 commands_dir=None,
@@ -283,9 +291,7 @@ class TestPaginatedAnnotationFilter:
             pass
 
         register_list_command(cli, registry)
-        result = CliRunner().invoke(
-            cli, ["list", "--flat", "--format", "json", "-a", "paginated"]
-        )
+        result = CliRunner().invoke(cli, ["list", "--flat", "--format", "json", "-a", "paginated"])
         assert result.exit_code == 0, result.output
         import json
 
@@ -313,9 +319,11 @@ class TestBindingPathStandaloneE2E:
         fake_writer = MagicMock()
         fake_writer.write.return_value = []
 
-        with patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)), patch(
-            "apcore_toolkit.DisplayResolver", MagicMock(return_value=MagicMock(resolve=lambda m, **kw: m))
-        ), patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)):
+        with (
+            patch("apcore_toolkit.BindingLoader", MagicMock(return_value=fake_loader)),
+            patch("apcore_toolkit.DisplayResolver", MagicMock(return_value=MagicMock(resolve=lambda m, **kw: m))),
+            patch("apcore_toolkit.RegistryWriter", MagicMock(return_value=fake_writer)),
+        ):
             cli = create_cli(
                 extensions_dir=str(tmp_path),
                 prog_name="apcore-cli",
