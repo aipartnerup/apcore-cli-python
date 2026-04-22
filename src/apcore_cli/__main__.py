@@ -32,6 +32,18 @@ def _extract_argv_option(argv: list[str] | None, flag: str) -> str | None:
     return None
 
 
+def _extract_argv_option_repeatable(argv: list[str] | None, flag: str) -> list[str]:
+    """Extract every occurrence of ``flag`` from argv (repeatable option)."""
+    args = argv if argv is not None else sys.argv[1:]
+    out: list[str] = []
+    for i, arg in enumerate(args):
+        if arg == flag and i + 1 < len(args):
+            out.append(args[i + 1])
+        elif arg.startswith(f"{flag}="):
+            out.append(arg.split("=", 1)[1])
+    return out
+
+
 def main(prog_name: str | None = None) -> None:
     """Main entry point for apcore-cli.
 
@@ -42,11 +54,13 @@ def main(prog_name: str | None = None) -> None:
     ext_dir = _extract_argv_option(None, "--extensions-dir")
     cmd_dir = _extract_argv_option(None, "--commands-dir")
     bind_path = _extract_argv_option(None, "--binding")
+    allowed_prefixes = _extract_argv_option_repeatable(None, "--allowed-prefix") or None
     cli = create_cli(
         extensions_dir=ext_dir,
         prog_name=prog_name,
         commands_dir=cmd_dir,
         binding_path=bind_path,
+        allowed_prefixes=allowed_prefixes,
     )
     cli(standalone_mode=True)
 

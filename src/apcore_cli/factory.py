@@ -75,6 +75,7 @@ def create_cli(
     app: Any | None = None,
     expose: dict | ExposureFilter | None = None,
     apcli: bool | dict | ApcliGroup | None = None,
+    allowed_prefixes: list[str] | None = None,
 ) -> click.Group:
     """Create the CLI application.
 
@@ -107,6 +108,18 @@ def create_cli(
              the app registry is empty (discovery fallthrough path).
         expose: Module exposure filter (FE-12). Accepts an ExposureFilter instance
                 or a dict that ExposureFilter.from_config can parse.
+        allowed_prefixes: Optional allowlist of module-path prefixes forwarded
+                          to :meth:`apcore_toolkit.RegistryWriter.write` when
+                          registering convention-scanned or binding-loaded
+                          modules. When set, ``resolve_target`` rejects any
+                          ``target:`` path outside the listed prefixes
+                          *before* calling ``importlib.import_module`` —
+                          mitigates arbitrary-code-execution via forged
+                          binding YAML (e.g. ``target: "os:system"``).
+                          Mirrors the TypeScript SDK's ``allowedPrefixes``
+                          option. Also settable from the CLI via the
+                          repeatable ``--allowed-prefix`` flag (standalone
+                          mode only).
         apcli: Built-in ``apcli`` group configuration (FE-13). Accepts:
 
                * ``True`` / ``False`` — shorthand for ``{mode: "all"}`` /
@@ -266,38 +279,19 @@ def create_cli(
             except Exception as e:
                 logger.warning("Discovery failed: %s", e)
 
-            # Convention module discovery
-            if commands_dir is not None:
-                try:
-                    from apcore_toolkit import RegistryWriter
-                    from apcore_toolkit.convention_scanner import ConventionScanner
-
-                    conv_scanner = ConventionScanner()
-                    conv_modules = conv_scanner.scan(commands_dir)
-                    if conv_modules:
-                        if binding_path is not None:
-                            try:
-                                from apcore_toolkit import DisplayResolver
-
-                                display_resolver = DisplayResolver()
-                                conv_modules = display_resolver.resolve(conv_modules, binding_path=binding_path)
-                                logger.info(
-                                    "DisplayResolver: applied binding from %s",
-                                    binding_path,
-                                )
-                            except ImportError:
-                                logger.warning("DisplayResolver not available in apcore-toolkit")
-                        writer = RegistryWriter()
-                        writer.write(conv_modules, registry)
-                        logger.info(
-                            "Convention scanner: registered %d modules from %s",
-                            len(conv_modules),
-                            commands_dir,
-                        )
-                except ImportError:
-                    logger.warning("apcore-toolkit not installed — convention module scanning unavailable")
-                except Exception as e:
-                    logger.warning("Convention module scanning failed: %s", e)
+            # Toolkit integration: convention scanner + binding loader.
+            # Split into a dedicated helper so the three SDK entry points
+            # (ConventionScanner, BindingLoader, DisplayResolver) can be
+            # composed cleanly — this brings the Python CLI to parity with
+            # ``../apcore-cli-typescript/src/main.ts::loadBindingDisplayOverlay``
+            # which wires BindingLoader through when only ``binding_path`` is
+            # supplied (previously a no-op in the Python CLI).
+            _apply_toolkit_integration(
+                registry,
+                commands_dir=commands_dir,
+                binding_path=binding_path,
+                allowed_prefixes=allowed_prefixes,
+            )
 
             executor = _Executor(registry)
         except Exception as e:
@@ -435,6 +429,18 @@ def create_cli(
                     help="Path to binding.yaml file or directory for display resolution.",
                     expose_value=False,
                 ),
+                click.Option(
+                    ["--allowed-prefix", "allowed_prefix_opt"],
+                    multiple=True,
+                    default=None,
+                    help=(
+                        "Allowlist of module-path prefixes for binding/convention "
+                        "``target:`` resolution (repeatable). Forwarded to "
+                        "RegistryWriter.write(allowed_prefixes=...). Mitigates "
+                        "code-exec via forged binding YAML."
+                    ),
+                    expose_value=False,
+                ),
             ]
         )
 
@@ -490,6 +496,93 @@ def create_cli(
             cli.add_command(cmd)
 
     return cli
+
+
+# ---------------------------------------------------------------------------
+# apcore-toolkit integration (ConventionScanner + BindingLoader + DisplayResolver)
+# ---------------------------------------------------------------------------
+
+
+def _apply_toolkit_integration(
+    registry: Any,
+    *,
+    commands_dir: str | None,
+    binding_path: str | None,
+    allowed_prefixes: list[str] | None,
+) -> None:
+    """Load convention-scanner and/or binding-loader modules into the registry.
+
+    Mirrors the TypeScript ``applyToolkitIntegration`` +
+    ``loadBindingDisplayOverlay`` pair
+    (``../apcore-cli-typescript/src/main.ts:706-781``). Both sources of
+    module metadata (Python ``ConventionScanner`` for in-code modules,
+    ``BindingLoader`` for ``.binding.yaml`` files) are parsed into
+    ``ScannedModule`` lists, enriched with display overlay via
+    ``DisplayResolver``, then written through ``RegistryWriter`` — the
+    single registration path ensures ``--allowed-prefix`` protection
+    applies to both sources consistently.
+
+    Silently no-op if ``apcore-toolkit`` is not installed; individual
+    optional features (``BindingLoader`` in toolkit < 0.5) degrade to
+    a WARNING and are skipped.
+    """
+    if commands_dir is None and binding_path is None:
+        return
+
+    try:
+        from apcore_toolkit import DisplayResolver, RegistryWriter
+    except ImportError:
+        logger.warning("apcore-toolkit not installed — toolkit features unavailable")
+        return
+
+    scanned: list[Any] = []
+
+    if commands_dir is not None:
+        try:
+            from apcore_toolkit.convention_scanner import ConventionScanner
+
+            scanner = ConventionScanner()
+            scanned.extend(scanner.scan(commands_dir))
+        except Exception as e:
+            logger.warning("Convention scanner failed on '%s': %s", commands_dir, e)
+
+    if binding_path is not None:
+        try:
+            from apcore_toolkit import BindingLoader
+        except ImportError:
+            # apcore-toolkit < 0.5.0 — silently skip the overlay (parity with
+            # TS main.ts:761 "apcore-toolkit < 0.5.0 (no BindingLoader)").
+            logger.warning("apcore-toolkit < 0.5.0: BindingLoader unavailable, --binding skipped")
+        else:
+            try:
+                loader = BindingLoader()
+                loaded = loader.load(binding_path)
+                scanned.extend(loaded)
+                logger.info(
+                    "BindingLoader: parsed %d module(s) from %s",
+                    len(loaded),
+                    binding_path,
+                )
+            except Exception as e:
+                logger.warning("BindingLoader failed on '%s': %s", binding_path, e)
+
+    if not scanned:
+        return
+
+    if binding_path is not None:
+        try:
+            resolver = DisplayResolver()
+            scanned = resolver.resolve(scanned, binding_path=binding_path)
+            logger.debug("DisplayResolver: applied binding overlay from %s", binding_path)
+        except Exception as e:
+            logger.warning("DisplayResolver failed: %s", e)
+
+    try:
+        writer = RegistryWriter()
+        writer.write(scanned, registry, allowed_prefixes=allowed_prefixes)
+        logger.info("RegistryWriter: registered %d toolkit-sourced module(s)", len(scanned))
+    except Exception as e:
+        logger.warning("RegistryWriter failed: %s", e)
 
 
 # ---------------------------------------------------------------------------

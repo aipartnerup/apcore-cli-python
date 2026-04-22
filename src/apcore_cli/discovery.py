@@ -109,6 +109,8 @@ def register_list_command(
                 "streaming",
                 "cacheable",
                 "idempotent",
+                # apcore >= 0.19.0 ModuleAnnotations additions.
+                "paginated",
             ]
         ),
         help="Filter by annotation flag (AND logic). Repeatable.",
@@ -188,6 +190,7 @@ def register_list_command(
                 "streaming": "streaming",
                 "cacheable": "cacheable",
                 "idempotent": "idempotent",
+                "paginated": "paginated",
             }
             for ann_flag in annotation:
                 attr = _ann_map.get(ann_flag, ann_flag)
