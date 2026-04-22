@@ -13,8 +13,6 @@ jobs:
   test:
     name: Test on Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
-    # container:
-    #   image: python:${{ matrix.python-version }}
     strategy:
       fail-fast: false
       matrix:
@@ -33,13 +31,23 @@ jobs:
     - name: Install uv
       uses: astral-sh/setup-uv@v5
 
-    - name: Install dependencies
+    # `--extra dev` pulls pytest, ruff, pre-commit, mypy, apdev; `--extra toolkit`
+    # brings in apcore-toolkit >= 0.5.0. apcore >= 0.19.0 comes from the main
+    # `dependencies` section and is installed unconditionally. Toolkit must be
+    # importable for tests/test_toolkit_integration.py (which uses
+    # `patch("apcore_toolkit.BindingLoader", ...)` — patch resolves the target
+    # at import time and fails if the module is absent).
+    - name: Install dependencies (apcore, apcore-toolkit, dev extras)
       run: |
-        uv sync --extra dev
+        uv sync --extra dev --extra toolkit
 
-    - name: Lint with Ruff
+    # Single pre-commit invocation covers ruff lint + ruff-format + apdev
+    # (check-chars, check-imports). Matches the TypeScript CI pattern at
+    # ../apcore-cli-typescript/.github/workflows/ci.yml which likewise runs
+    # `pre-commit run --all-files` as the lint gate.
+    - name: Run pre-commit (ruff + apdev hooks)
       run: |
-        uv run ruff check src/ tests/
+        uv run pre-commit run --all-files
 
     - name: Run tests
       run: |
