@@ -6,17 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
-## [0.7.0] - 2026-04-15
+## [0.7.0] - 2026-04-23
 
 ### Changed
 
 - **Dependency bump**: requires `apcore >= 0.18.0` (was `>= 0.17.1`). Aligns with upstream `apcore 0.18.0` and `apcore-toolkit 0.4.2` breaking changes.
 - **`MAX_MODULE_ID_LENGTH` 128 → 192**: `validate_module_id()` and all references updated to the new 192-character limit introduced in `apcore 0.18.0` (`apcore.registry.registry.MAX_MODULE_ID_LENGTH`).
 - **`describe-pipeline` renders `StrategyInfo`**: `executor.describe_pipeline(strategy)` now returns a `StrategyInfo` dataclass (`name`, `step_count`, `step_names`, `description`). `strategy.py` updated to use `StrategyInfo` fields; header line is `Pipeline: {info.name} ({info.step_count} steps)`. Falls back gracefully to the legacy `_resolve_strategy_name` path when `describe_pipeline` is unavailable.
+- **CI — spec-repo checkout**: `.github/workflows/ci.yml` now checks out `aiperceivable/apcore-cli` into `.apcore-cli-spec/` and exposes it to `pytest` via `APCORE_CLI_SPEC_REPO`. Mirrors the pattern established in `apcore-python` / `apcore-cli-typescript`.
 
 ### Added
 
 - **`create_cli(app=...)` parameter**: `create_cli()` accepts an optional `app: APCore` unified client (introduced in `apcore 0.18.0`). `app` is mutually exclusive with `registry`/`executor` (raises `ValueError`). When `app` is provided, `registry` and `executor` are extracted from `app.registry` and `app.executor`. Filesystem discovery is skipped if `app.registry` already contains registered modules; otherwise normal discovery proceeds into `app.registry`.
+- **Cross-language conformance test harness** (`tests/conformance/`) consuming the shared apcli-visibility fixtures from the `aiperceivable/apcore-cli` spec repo (`conformance/fixtures/apcli-visibility/`). Behavioral assertions (apcli group visibility, registered subcommand set for `include`/`exclude` modes, always-registered `exec`) run today across all five canonical scenarios (`standalone-default`, `embedded-default`, `cli-override`, `env-override`, `yaml-include`). Byte-matching against `expected_help.txt` is marked `xfail` until Click's `HelpFormatter` is replaced with a canonical clap v4 / GNU-style emitter, tracked for parity with `apcore-cli-typescript/src/canonical-help.ts`.
+- **`APCORE_CLI_SPEC_REPO` env var** — overrides the spec-repo lookup path for conformance fixtures. Defaults to a sibling checkout (`../apcore-cli/`). Tests are skipped (not failed) when the spec repo is absent.
 - **FE-12: Module Exposure Filtering** — Declarative control over which discovered modules are exposed as CLI commands.
   - `ExposureFilter` class in `exposure.py` with `is_exposed(module_id)` and `filter_modules(ids)` methods.
   - Three modes: `all` (default), `include` (whitelist), `exclude` (blacklist) with glob-pattern matching.

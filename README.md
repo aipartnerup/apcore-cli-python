@@ -520,14 +520,32 @@ apcore-cli --extensions-dir ./extensions greet.hello --name Alice --greeting Hi
 
 ## Development
 
+The conformance suite under `tests/conformance/` reads shared fixtures
+from the **spec repo** (`aiperceivable/apcore-cli`). Clone it as a sibling
+of this repo, or point `APCORE_CLI_SPEC_REPO` at an existing checkout:
+
 ```bash
+# One-time: clone both repos side by side
+git clone https://github.com/aiperceivable/apcore-cli.git
 git clone https://github.com/aiperceivable/apcore-cli-python.git
+
 cd apcore-cli-python
 pip install -e ".[dev]"
-pytest                           # 394+ tests
+pytest                           # reads fixtures from ../apcore-cli/conformance/
 pytest --cov                     # with coverage report
-bash examples/run_examples.sh   # run all examples
+bash examples/run_examples.sh    # run all examples
 ```
+
+Alternative layout (spec repo checked out elsewhere):
+
+```bash
+export APCORE_CLI_SPEC_REPO=/path/to/apcore-cli
+pytest
+```
+
+Without the spec repo the conformance tests are skipped (pytest reports
+them as `skipped`, not `failed`). CI clones the spec repo automatically —
+see `.github/workflows/ci.yml`.
 
 ## License
 

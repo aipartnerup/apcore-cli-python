@@ -16,3 +16,4 @@ venv/
 env/
 .env
 .forge
+.mypy_cache/
