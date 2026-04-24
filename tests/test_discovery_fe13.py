@@ -11,13 +11,14 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
+from click.testing import CliRunner
+
 from apcore_cli.discovery import (
     register_describe_command,
     register_exec_command,
     register_list_command,
     register_validate_command,
 )
-from click.testing import CliRunner
 
 
 def _make_module_def(module_id: str = "foo.bar"):

@@ -6,8 +6,9 @@ import json
 from io import StringIO
 from unittest.mock import MagicMock, patch
 
-from apcore_cli.strategy import _PRESET_STEPS, _render_pipeline_table, register_pipeline_command
 from click.testing import CliRunner
+
+from apcore_cli.strategy import _PRESET_STEPS, _render_pipeline_table, register_pipeline_command
 
 
 def _make_step(name: str, pure: bool = False, removable: bool = True, timeout_ms: int | None = None) -> MagicMock:

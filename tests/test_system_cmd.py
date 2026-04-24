@@ -14,6 +14,8 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
+from click.testing import CliRunner
+
 from apcore_cli.system_cmd import (
     _call_system_module,
     _check_system_approval,
@@ -29,7 +31,6 @@ from apcore_cli.system_cmd import (
     register_system_commands,
     register_usage_command,
 )
-from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
 # Helpers

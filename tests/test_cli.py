@@ -5,6 +5,7 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
+
 from apcore_cli.cli import (
     GroupedModuleGroup,
     LazyModuleGroup,
@@ -325,8 +326,9 @@ class TestMainEntryPoint:
     """Task 5: main() entry point and CLI integration."""
 
     def test_main_help_flag(self, tmp_path):
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path)), ["--help"])
@@ -334,8 +336,9 @@ class TestMainEntryPoint:
         assert "apcore-cli" in result.output.lower() or "apcore" in result.output.lower()
 
     def test_main_version_flag(self, tmp_path):
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path), prog_name="apcore-cli"), ["--version"])
@@ -347,6 +350,7 @@ class TestMainEntryPoint:
 
     def test_main_extensions_dir_not_found(self):
         import pytest
+
         from apcore_cli.__main__ import create_cli
 
         with pytest.raises(SystemExit) as exc_info:
@@ -354,8 +358,9 @@ class TestMainEntryPoint:
         assert exc_info.value.code == 47
 
     def test_main_extensions_dir_valid(self, tmp_path):
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         # Create a minimal extensions dir
         (tmp_path / "apcore.yaml").write_text("modules: {}\n")
@@ -369,8 +374,9 @@ class TestMainEntryPoint:
     def test_log_level_flag_takes_effect(self, tmp_path):
         import logging
 
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         original_level = logging.getLogger().level
         try:
@@ -402,8 +408,9 @@ class TestMainEntryPoint:
     def test_cli_logging_level_takes_priority_over_global(self, tmp_path, monkeypatch):
         import logging
 
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         original_level = logging.getLogger().level
         try:
@@ -421,8 +428,9 @@ class TestMainEntryPoint:
     def test_cli_logging_level_fallback_to_global(self, tmp_path, monkeypatch):
         import logging
 
-        from apcore_cli.__main__ import create_cli
         from click.testing import CliRunner
+
+        from apcore_cli.__main__ import create_cli
 
         # CLI-specific not set — must fall back to global
         monkeypatch.delenv("APCORE_CLI_LOGGING_LEVEL", raising=False)

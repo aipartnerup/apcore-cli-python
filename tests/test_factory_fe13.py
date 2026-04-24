@@ -20,6 +20,7 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
+
 from apcore_cli.builtin_group import ApcliGroup
 from apcore_cli.factory import create_cli
 
