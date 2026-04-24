@@ -61,3 +61,63 @@ class TestSandbox:
             )
             with pytest.raises(ModuleExecutionError, match="non-JSON output"):
                 sandbox._sandboxed_execute("mod", {})
+
+    def test_sandbox_env_does_not_leak_auth_api_key(self):
+        """C1: APCORE_AUTH_API_KEY must not reach the sandboxed subprocess."""
+        sandbox = Sandbox(enabled=True)
+        parent_env = {"APCORE_AUTH_API_KEY": "secret-token", "PATH": "/usr/bin"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", parent_env, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            assert "APCORE_AUTH_API_KEY" not in call_env
+
+    def test_sandbox_env_forwards_allowed_apcore_vars(self):
+        """Non-secret APCORE_* vars in the allowlist must still be forwarded."""
+        sandbox = Sandbox(enabled=True)
+        parent_env = {
+            "APCORE_EXTENSIONS_ROOT": "/some/path",
+            "APCORE_LOG_LEVEL": "DEBUG",
+            "APCORE_AUTH_API_KEY": "secret",
+            "PATH": "/usr/bin",
+        }
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", parent_env, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            assert "APCORE_LOG_LEVEL" in call_env
+            assert "APCORE_AUTH_API_KEY" not in call_env
+
+    def test_sandbox_extensions_root_injected_as_absolute(self):
+        """C2: extensions_root kwarg must be injected as APCORE_EXTENSIONS_ROOT
+        with an absolute path so module discovery works under cwd=tmpdir."""
+        sandbox = Sandbox(enabled=True, extensions_root="/abs/extensions")
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", {}, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            assert call_env.get("APCORE_EXTENSIONS_ROOT") == "/abs/extensions"
+
+    def test_sandbox_extensions_root_env_var_resolved_to_absolute(self):
+        """C2: a relative APCORE_EXTENSIONS_ROOT env var must be resolved to
+        an absolute path before injecting it into the subprocess env."""
+        sandbox = Sandbox(enabled=True)
+        parent_env = {"APCORE_EXTENSIONS_ROOT": "./extensions", "PATH": "/usr/bin"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", parent_env, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            assert call_env.get("APCORE_EXTENSIONS_ROOT", "").startswith("/")
+
+    def test_sandbox_output_size_limit_raises(self):
+        """W6 (D3): oversized subprocess output must raise ModuleExecutionError."""
+        sandbox = Sandbox(enabled=True, max_output_bytes=100)
+        big_stdout = "x" * 200
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout=big_stdout, stderr="")
+            with pytest.raises(ModuleExecutionError, match="exceeded"):
+                sandbox._sandboxed_execute("mod", {})
