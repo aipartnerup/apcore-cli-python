@@ -42,10 +42,10 @@ def _check_system_approval(executor: Any, module_id: str, auto_approve: bool) ->
             check_approval(module_def, auto_approve)
     except SystemExit:
         raise
-    except Exception:
+    except Exception as e:
         # If we can't get module definition, skip approval check.
         # The executor's built-in approval gate will still fire.
-        pass
+        logger.warning("Could not perform pre-flight approval check for %s: %s", module_id, e)
 
 
 def _system_modules_available(executor: Any) -> bool:
@@ -56,7 +56,8 @@ def _system_modules_available(executor: Any) -> bool:
             return True
         if hasattr(executor, "_registry"):
             return executor._registry.get_definition("system.health.summary") is not None
-    except Exception:
+    except Exception as e:
+        logger.warning("System module probe failed (system commands will be unavailable): %s", e)
         return False
     return False
 

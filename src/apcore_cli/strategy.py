@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import contextlib
 import json
+import logging
 import sys
 from typing import Any
 
 import click
 
 from apcore_cli.output import resolve_format
+
+logger = logging.getLogger(__name__)
 
 _PRESET_STEPS = {
     "standard": [
@@ -138,11 +141,15 @@ def register_pipeline_command(cli: click.Group, executor: Any) -> None:
             steps_info: list[dict[str, Any]] = []
             strategy_obj = None
             if hasattr(executor, "_strategy"):
-                with contextlib.suppress(AttributeError, NotImplementedError, TypeError):
+                try:
                     strategy_obj = executor._strategy
+                except (AttributeError, NotImplementedError, TypeError) as e:
+                    logger.warning("executor._strategy access failed; using step-names fallback: %s", e)
             if strategy_obj is None and hasattr(executor, "_resolve_strategy_name"):
-                with contextlib.suppress(AttributeError, NotImplementedError, TypeError):
+                try:
                     strategy_obj = executor._resolve_strategy_name(strategy)
+                except (AttributeError, NotImplementedError, TypeError) as e:
+                    logger.warning("executor._resolve_strategy_name failed; using step-names fallback: %s", e)
 
             if strategy_obj is not None and hasattr(strategy_obj, "steps"):
                 for step in strategy_obj.steps:
@@ -165,8 +172,10 @@ def register_pipeline_command(cli: click.Group, executor: Any) -> None:
         # Fall back to legacy _resolve_strategy_name (apcore < 0.18.0)
         strategy_obj = None
         if hasattr(executor, "_resolve_strategy_name"):
-            with contextlib.suppress(AttributeError, NotImplementedError, TypeError):
+            try:
                 strategy_obj = executor._resolve_strategy_name(strategy)
+            except (AttributeError, NotImplementedError, TypeError) as e:
+                logger.warning("executor._resolve_strategy_name failed; using preset-steps fallback: %s", e)
 
         if strategy_obj is None:
             # Provide static info for known strategies
