@@ -34,10 +34,14 @@
 
 ## v0.6.0 Conventions
 
-- Public surface (`__init__.py`): minimal — `__version__`, `create_cli`, `ExposureFilter`,
-  plus re-exported error classes (AuthenticationError, ConfigDecryptionError,
-  ModuleExecutionError, ApprovalTimeoutError, ApprovalDeniedError). All other symbols
-  must be imported via full submodule path (e.g., `from apcore_cli.cli import GroupedModuleGroup`).
+- Public surface (`__init__.py`): `__version__`, `create_cli`, `ExposureFilter`,
+  `ApcliGroup`, `ApcliMode`, `RESERVED_GROUP_NAMES`, `CliApprovalHandler`,
+  `resolve_refs`, `schema_to_click_options`, `format_exec_result`,
+  `ConfigResolver`, `AuditLogger`, `AuthProvider`, `ConfigEncryptor`, `Sandbox`,
+  plus error classes (AuthenticationError, ConfigDecryptionError,
+  ModuleExecutionError, ApprovalTimeoutError, ApprovalDeniedError).
+  Non-listed symbols (e.g. `GroupedModuleGroup`) must be imported via full
+  submodule path (e.g., `from apcore_cli.cli import GroupedModuleGroup`).
 - ExposureFilter + `expose=` kwarg on create_cli (FE-12).
 - `extra_commands=[...]` kwarg on create_cli as the FE-11 extension point (with
   collision detection against BUILTIN_COMMANDS).
