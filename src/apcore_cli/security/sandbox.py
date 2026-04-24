@@ -65,4 +65,8 @@ class Sandbox:
             if result.returncode != 0:
                 raise ModuleExecutionError(f"Error: Module '{module_id}' execution failed: {result.stderr}")
 
-            return json.loads(result.stdout)
+            try:
+                return json.loads(result.stdout)
+            except json.JSONDecodeError as err:
+                preview = result.stdout[:200]
+                raise ModuleExecutionError(f"Error: Module '{module_id}' returned non-JSON output: {preview}") from err

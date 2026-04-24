@@ -3,7 +3,6 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from apcore_cli.security.sandbox import ModuleExecutionError, Sandbox
 
 
@@ -48,3 +47,16 @@ class TestSandbox:
             mock_run.return_value = MagicMock(returncode=0, stdout='{"key": "value", "num": 123}', stderr="")
             result = sandbox._sandboxed_execute("mod", {})
         assert result == {"key": "value", "num": 123}
+
+    def test_sandbox_non_json_stdout_on_success_raises_module_execution_error(self):
+        """W9: a subprocess that exits 0 but emits non-JSON stdout must surface
+        as the documented ModuleExecutionError contract, not raw JSONDecodeError."""
+        sandbox = Sandbox(enabled=True)
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="DeprecationWarning: blah\n{not-json-at-all",
+                stderr="",
+            )
+            with pytest.raises(ModuleExecutionError, match="non-JSON output"):
+                sandbox._sandboxed_execute("mod", {})
