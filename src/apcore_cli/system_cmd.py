@@ -335,9 +335,11 @@ def register_config_command(apcli_group: click.Group, executor: Any) -> None:
     @click.argument("key")
     @click.argument("value")
     @click.option("--reason", required=True, help="Reason for config change (required for audit).")
+    @click.option("-y", "--yes", "auto_approve", is_flag=True, default=False, help="Auto-approve.")
     @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
-    def config_set_cmd(key: str, value: str, reason: str, output_format: str | None) -> None:
+    def config_set_cmd(key: str, value: str, reason: str, auto_approve: bool, output_format: str | None) -> None:
         """Update a runtime configuration value (requires approval)."""
+        _check_system_approval(executor, "system.control.update_config", auto_approve)
         fmt = resolve_format(output_format)
         try:
             parsed_value = json.loads(value)

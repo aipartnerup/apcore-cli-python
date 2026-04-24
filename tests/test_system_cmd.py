@@ -14,8 +14,6 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-from click.testing import CliRunner
-
 from apcore_cli.system_cmd import (
     _call_system_module,
     _check_system_approval,
@@ -31,6 +29,7 @@ from apcore_cli.system_cmd import (
     register_system_commands,
     register_usage_command,
 )
+from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -388,6 +387,28 @@ class TestConfigCommand:
         cli = _build_apcli_with(register_config_command, ex)
         result = CliRunner().invoke(cli, ["config", "set", "k", "v", "--reason", "r"])
         assert result.exit_code == 1
+
+    def test_config_set_accepts_yes_flag(self):
+        """W3: config set must accept --yes/-y to bypass CLI-side approval,
+        matching enable/disable/reload sibling commands."""
+        ex = _make_executor(return_value={"old_value": None, "new_value": 1})
+        cli = _build_apcli_with(register_config_command, ex)
+        result = CliRunner().invoke(cli, ["config", "set", "k", "1", "--reason", "r", "--yes"])
+        assert result.exit_code == 0, result.output
+
+    def test_config_set_approval_gate_invoked(self):
+        """W3: config set must route through _check_system_approval — verifies
+        the CLI-side prompt wiring is present (sibling to enable/disable/reload)."""
+        from unittest.mock import patch
+
+        ex = _make_executor(return_value={"old_value": None, "new_value": 1})
+        cli = _build_apcli_with(register_config_command, ex)
+        with patch("apcore_cli.system_cmd._check_system_approval") as mock_gate:
+            CliRunner().invoke(cli, ["config", "set", "k", "1", "--reason", "r", "-y"])
+        mock_gate.assert_called_once()
+        args, _ = mock_gate.call_args
+        assert args[1] == "system.control.update_config"
+        assert args[2] is True  # --yes propagated as auto_approve
 
 
 # ---------------------------------------------------------------------------
