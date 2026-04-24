@@ -163,7 +163,8 @@ def _create_binding_module(
     base_bindings.mkdir(parents=True, exist_ok=True)
 
     yaml_file = base_bindings / (module_id.replace(".", "_") + ".binding.yaml")
-    target = f"commands.{prefix}:{func_name}"
+    src_base_name = Path(output_dir or "commands").name
+    target = f"{src_base_name}.{prefix}:{func_name}"
 
     if not _refuse_if_exists(yaml_file, force):
         return
@@ -176,13 +177,11 @@ def _create_binding_module(
     yaml_file.write_text(yaml_content)
     click.echo(f"Created {yaml_file}")
 
-    # Also create the target function file
-    base_src = Path("commands")
+    # Also create the target function file — honour --dir so all artifacts land together
+    base_src = Path(output_dir or "commands")
     base_src.mkdir(parents=True, exist_ok=True)
     src_file = base_src / (prefix.replace(".", "_") + ".py")
-    # Retain existing src_file unless --force is set — protects the user's edits
-    # on subsequent inits with different descriptions.
-    if src_file.exists() and not force:
+    if not _refuse_if_exists(src_file, force):
         return
     src_content = (
         f"def {func_name}() -> dict:\n"
