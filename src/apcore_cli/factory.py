@@ -319,7 +319,10 @@ def create_cli(
             executor.set_approval_handler(handler)
             logger.debug("CliApprovalHandler wired to Executor (timeout=%ds).", approval_timeout)
     except Exception as e:
-        logger.debug("Could not wire CliApprovalHandler: %s", e)
+        # Surface at WARNING so a misconfigured apcore runtime (e.g., signature
+        # drift in set_approval_handler) doesn't silently skip the gate — modules
+        # with requires_approval=True would otherwise execute with no prompt.
+        logger.warning("Failed to wire CliApprovalHandler: %s", e)
 
     # Build exposure filter (FE-12)
     if isinstance(expose, ExposureFilter):

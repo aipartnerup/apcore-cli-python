@@ -20,7 +20,6 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-
 from apcore_cli.builtin_group import ApcliGroup
 from apcore_cli.factory import create_cli
 
@@ -192,3 +191,31 @@ class TestExtraCommandsRuntime:
                 prog_name="apcore-cli",
                 extra_commands=[rogue],
             )
+
+
+class TestApprovalHandlerWiringFailure:
+    """W2: approval-handler wiring failure must surface at WARNING, not DEBUG."""
+
+    def test_wiring_failure_logs_warning(self, tmp_path, caplog):
+        """When executor.set_approval_handler raises, the message reaches the
+        default WARNING log level — otherwise operators never see that
+        requires_approval modules will silently bypass the gate."""
+        from unittest.mock import MagicMock
+
+        # Injected executor whose set_approval_handler raises — simulates an
+        # apcore version whose signature drifted or whose handler hook is broken.
+        registry = MagicMock()
+        registry.list.return_value = []
+        executor = MagicMock()
+        executor.set_approval_handler.side_effect = RuntimeError("handler hook broken")
+
+        with caplog.at_level(logging.WARNING, logger="apcore_cli.factory"):
+            create_cli(
+                extensions_dir=str(tmp_path),
+                prog_name="apcore-cli",
+                registry=registry,
+                executor=executor,
+            )
+        text = " ".join(r.getMessage() for r in caplog.records)
+        assert "Failed to wire CliApprovalHandler" in text
+        assert "handler hook broken" in text
