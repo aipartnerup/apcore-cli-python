@@ -81,12 +81,14 @@ class _LazyGroup(click.Group):
         members: dict[str, tuple[str, Any]],
         executor: Any,
         help_text_max_length: int = 1000,
+        extensions_root: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._members = members  # dict[cmd_name, (module_id, descriptor)]
         self._executor = executor
         self._help_text_max_length = help_text_max_length
+        self._extensions_root = extensions_root
         self._cmd_cache: dict[str, click.Command] = {}
 
     def list_commands(self, ctx: click.Context) -> list[str]:
@@ -104,6 +106,7 @@ class _LazyGroup(click.Group):
             self._executor,
             help_text_max_length=self._help_text_max_length,
             cmd_name=cmd_name,
+            extensions_root=self._extensions_root,
         )
         self._cmd_cache[cmd_name] = cmd
         return cmd
@@ -117,12 +120,14 @@ class LazyModuleGroup(click.Group):
         registry: Registry,
         executor: Executor,
         help_text_max_length: int = 1000,
+        extensions_root: str | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self._registry = registry
         self._executor = executor
         self._help_text_max_length = help_text_max_length
+        self._extensions_root = extensions_root
         self._module_cache: dict[str, click.Command] = {}
         # alias → canonical module_id (populated lazily)
         self._alias_map: dict[str, str] = {}
@@ -188,6 +193,7 @@ class LazyModuleGroup(click.Group):
             self._executor,
             help_text_max_length=self._help_text_max_length,
             cmd_name=cmd_name,
+            extensions_root=self._extensions_root,
         )
         self._module_cache[cmd_name] = cmd
         return cmd
@@ -311,6 +317,7 @@ class GroupedModuleGroup(LazyModuleGroup):
                 members=self._group_map[cmd_name],
                 executor=self._executor,
                 help_text_max_length=self._help_text_max_length,
+                extensions_root=self._extensions_root,
                 name=cmd_name,
             )
             self._group_cache[cmd_name] = grp
@@ -326,6 +333,7 @@ class GroupedModuleGroup(LazyModuleGroup):
                 self._executor,
                 help_text_max_length=self._help_text_max_length,
                 cmd_name=cmd_name,
+                extensions_root=self._extensions_root,
             )
             self._module_cache[cmd_name] = cmd
             return cmd
@@ -539,6 +547,7 @@ def build_module_command(
     executor: Executor,
     help_text_max_length: int = 1000,
     cmd_name: str | None = None,
+    extensions_root: str | None = None,
 ) -> click.Command:
     """Build a Click command from an apcore module definition.
 
@@ -759,7 +768,7 @@ def build_module_command(
                 return
 
             # -- Standard execution (with optional strategy) --
-            sandbox = Sandbox(enabled=sandbox_flag)
+            sandbox = Sandbox(enabled=sandbox_flag, extensions_root=extensions_root)
             if strategy_name and hasattr(executor, "call_with_trace"):
                 if sandbox_flag:
                     # Sandbox mode: delegate to subprocess (strategy not available in sandbox)
@@ -778,6 +787,12 @@ def build_module_command(
                         err=True,
                     )
             else:
+                if strategy_name and not hasattr(executor, "call_with_trace"):
+                    logger.warning(
+                        "--strategy '%s' requested but executor does not support call_with_trace; "
+                        "using default pipeline.",
+                        strategy_name,
+                    )
                 result = sandbox.execute(module_id, merged, executor)
             duration_ms = int((time.monotonic() - audit_start) * 1000)
 

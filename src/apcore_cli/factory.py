@@ -99,7 +99,10 @@ def create_cli(
                   registry, skips Executor construction. If omitted but registry
                   is provided, an Executor is built from the given registry.
         extra_commands: Extra Click commands to add to the CLI root (FE-11 §3.11).
-                        Names must not collide with BUILTIN_COMMANDS.
+                        Names must not collide with RESERVED_GROUP_NAMES (i.e. 'apcli')
+                        or any existing top-level command. Collisions with deprecation
+                        shims are detected and raise ValueError. Note: BUILTIN_COMMANDS
+                        was retired in v0.7.0; see cli.py for the retirement notice.
         app: APCore unified client (apcore >= 0.18.0). Mutually exclusive with
              registry/executor. When provided, registry and executor are extracted
              from app.registry and app.executor. Filesystem discovery is skipped
@@ -370,6 +373,7 @@ def create_cli(
         executor=executor,
         help_text_max_length=help_text_max_length,
         exposure_filter=exposure_filter,
+        extensions_root=ext_dir,
         name=prog_name,
         help="CLI adapter for the apcore module ecosystem.",
     )
