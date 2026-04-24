@@ -141,6 +141,57 @@ class TestFormatModuleList:
         # Description should be truncated (either "..." or unicode "…")
         assert "..." in out or "\u2026" in out
 
+    def test_format_list_csv_produces_output(self, capsys):
+        modules = [
+            _make_mock_module("math.add", "Add two numbers.", ["math"]),
+            _make_mock_module("text.fmt", "Format text.", ["text"]),
+        ]
+        format_module_list(modules, "csv")
+        out = capsys.readouterr().out
+        assert out.strip(), "csv format must produce non-empty output"
+        assert "math.add" in out
+        assert "text.fmt" in out
+
+    def test_format_list_csv_has_header(self, capsys):
+        modules = [_make_mock_module("math.add", "Add.", ["math"])]
+        format_module_list(modules, "csv")
+        out = capsys.readouterr().out
+        first_line = out.splitlines()[0]
+        assert "id" in first_line
+
+    def test_format_list_yaml_produces_output(self, capsys):
+        modules = [_make_mock_module("math.add", "Add two numbers.", ["math"])]
+        format_module_list(modules, "yaml")
+        out = capsys.readouterr().out
+        assert out.strip(), "yaml format must produce non-empty output"
+        assert "math.add" in out
+
+    def test_format_list_jsonl_produces_output(self, capsys):
+        modules = [
+            _make_mock_module("math.add", "Add.", ["math"]),
+            _make_mock_module("text.fmt", "Format.", ["text"]),
+        ]
+        format_module_list(modules, "jsonl")
+        out = capsys.readouterr().out
+        lines = [ln for ln in out.splitlines() if ln.strip()]
+        assert len(lines) == 2, "jsonl must emit one line per module"
+        first = json.loads(lines[0])
+        assert first["id"] == "math.add"
+
+
+class TestAnnotationsToDictErrors:
+    def test_annotations_to_dict_attribute_error_returns_none(self):
+        """Narrowed except must return None cleanly without crash."""
+        from apcore_cli.output import _annotations_to_dict
+
+        class Bad:
+            @property
+            def __dict__(self):
+                raise AttributeError("no dict")
+
+        result = _annotations_to_dict(Bad())
+        assert result is None
+
 
 class TestFormatModuleDetail:
     def test_format_detail_table_full(self, capsys):

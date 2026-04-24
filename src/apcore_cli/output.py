@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -16,6 +17,8 @@ from apcore_cli.display_helpers import get_cli_display_fields as _get_cli_fields
 
 if TYPE_CHECKING:
     from apcore.registry.types import ModuleDescriptor
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_format(explicit_format: str | None) -> str:
@@ -81,8 +84,8 @@ def format_module_list(
             table.add_row(*row)
 
         Console().print(table)
-    elif format == "json":
-        result = []
+    elif format in ("json", "csv", "yaml", "jsonl"):
+        rows: list[dict[str, Any]] = []
         for m in modules:
             mid, desc, tags_val = _get_cli_fields(m)
             entry: dict[str, Any] = {
@@ -95,8 +98,31 @@ def format_module_list(
                 entry["dependency_count"] = len(deps)
             if exposure_filter is not None:
                 entry["exposed"] = exposure_filter.is_exposed(mid)
-            result.append(entry)
-        click.echo(json.dumps(result, indent=2))
+            rows.append(entry)
+
+        if format == "json":
+            click.echo(json.dumps(rows, indent=2))
+        elif format == "csv":
+            import csv
+            import io
+
+            if rows:
+                buf = io.StringIO()
+                writer = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
+                writer.writeheader()
+                for row in rows:
+                    writer.writerow({k: str(v) for k, v in row.items()})
+                click.echo(buf.getvalue().rstrip())
+        elif format == "yaml":
+            try:
+                import yaml
+
+                click.echo(yaml.dump(rows, default_flow_style=False, allow_unicode=True).rstrip())
+            except ImportError:
+                click.echo(json.dumps(rows, indent=2))
+        elif format == "jsonl":
+            for row in rows:
+                click.echo(json.dumps(row))
 
 
 def _annotations_to_dict(annotations: Any) -> dict | None:
@@ -115,8 +141,8 @@ def _annotations_to_dict(annotations: Any) -> dict | None:
                 for k, v in dataclasses.asdict(annotations).items()
                 if v is not None and v is not False and v != 0 and v != []
             }
-    except Exception:
-        pass
+    except (TypeError, AttributeError) as e:
+        logger.debug("Could not extract annotations via dataclasses.asdict: %s", e)
     # Fallback: try vars()
     try:
         d = {
@@ -125,7 +151,8 @@ def _annotations_to_dict(annotations: Any) -> dict | None:
             if not k.startswith("_") and v is not None and v is not False and v != 0
         }
         return d if d else None
-    except Exception:
+    except (TypeError, AttributeError) as e:
+        logger.debug("Could not extract annotations via vars(): %s", e)
         return None
 
 
