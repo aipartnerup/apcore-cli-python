@@ -21,6 +21,7 @@ from typing import Any
 
 import click
 
+import apcore_cli.cli as _cli_module
 from apcore_cli.approval import check_approval
 from apcore_cli.output import format_exec_result, resolve_format
 
@@ -34,18 +35,26 @@ def _call_system_module(executor: Any, module_id: str, inputs: dict[str, Any]) -
 
 def _check_system_approval(executor: Any, module_id: str, auto_approve: bool) -> None:
     """Check approval for system commands that have requires_approval=True."""
+    module_def = _try_get_module_def(executor, module_id)
+    if module_def is not None:
+        # Let check_approval's own exits (sys.exit(46), ApprovalDeniedError, etc.)
+        # propagate to the caller — only the registry-lookup step is guarded above.
+        check_approval(module_def, auto_approve)
+
+
+def _try_get_module_def(executor: Any, module_id: str) -> Any:
+    """Best-effort registry lookup via executor._registry (apcore private attr).
+
+    Centralises the private-attribute access so the fragility surface is one
+    function rather than scattered across system_cmd and strategy. Falls back
+    to None on any AttributeError so callers gracefully degrade.
+    """
     try:
-        module_def = None
         if hasattr(executor, "_registry"):
-            module_def = executor._registry.get_definition(module_id)
-        if module_def is not None:
-            check_approval(module_def, auto_approve)
-    except SystemExit:
-        raise
+            return executor._registry.get_definition(module_id)
     except Exception as e:
-        # If we can't get module definition, skip approval check.
-        # The executor's built-in approval gate will still fire.
-        logger.warning("Could not perform pre-flight approval check for %s: %s", module_id, e)
+        logger.warning("executor._registry.get_definition(%r) failed: %s", module_id, e)
+    return None
 
 
 def _system_modules_available(executor: Any) -> bool:
@@ -54,12 +63,10 @@ def _system_modules_available(executor: Any) -> bool:
         if hasattr(executor, "validate"):
             executor.validate("system.health.summary", {})
             return True
-        if hasattr(executor, "_registry"):
-            return executor._registry.get_definition("system.health.summary") is not None
+        return _try_get_module_def(executor, "system.health.summary") is not None
     except Exception as e:
         logger.warning("System module probe failed (system commands will be unavailable): %s", e)
         return False
-    return False
 
 
 def _format_health_summary_tty(result: dict[str, Any]) -> None:
@@ -225,24 +232,47 @@ def register_enable_command(apcli_group: click.Group, executor: Any) -> None:
 
     @apcli_group.command("enable")
     @click.argument("module_id")
-    @click.option("--reason", required=True, help="Reason for enabling (required for audit).")
+    @click.option("--reason", required=True, help="Reason for enabling (recorded in module audit trail).")
     @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
     @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
     def enable_cmd(module_id: str, reason: str, yes: bool, output_format: str | None) -> None:
         """Enable a disabled module at runtime."""
+        import time
+
         _check_system_approval(executor, "system.control.toggle_feature", yes)
         fmt = resolve_format(output_format)
+        audit_start = time.monotonic()
         try:
             result = _call_system_module(
                 executor,
                 "system.control.toggle_feature",
                 {"module_id": module_id, "enabled": True, "reason": reason},
             )
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(
+                    "system.control.toggle_feature",
+                    {"module_id": module_id, "enabled": True},
+                    "success",
+                    0,
+                    duration_ms,
+                )
             if fmt == "json" or not sys.stdout.isatty():
                 click.echo(json.dumps(result, indent=2, default=str))
             else:
                 click.echo(f"Module '{module_id}' enabled.\n  Reason: {reason}")
         except Exception as e:
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(
+                    "system.control.toggle_feature",
+                    {"module_id": module_id, "enabled": True},
+                    "error",
+                    1,
+                    duration_ms,
+                )
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
@@ -254,24 +284,47 @@ def register_disable_command(apcli_group: click.Group, executor: Any) -> None:
 
     @apcli_group.command("disable")
     @click.argument("module_id")
-    @click.option("--reason", required=True, help="Reason for disabling (required for audit).")
+    @click.option("--reason", required=True, help="Reason for disabling (recorded in module audit trail).")
     @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
     @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
     def disable_cmd(module_id: str, reason: str, yes: bool, output_format: str | None) -> None:
         """Disable a module at runtime (calls are rejected until re-enabled)."""
+        import time
+
         _check_system_approval(executor, "system.control.toggle_feature", yes)
         fmt = resolve_format(output_format)
+        audit_start = time.monotonic()
         try:
             result = _call_system_module(
                 executor,
                 "system.control.toggle_feature",
                 {"module_id": module_id, "enabled": False, "reason": reason},
             )
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(
+                    "system.control.toggle_feature",
+                    {"module_id": module_id, "enabled": False},
+                    "success",
+                    0,
+                    duration_ms,
+                )
             if fmt == "json" or not sys.stdout.isatty():
                 click.echo(json.dumps(result, indent=2, default=str))
             else:
                 click.echo(f"Module '{module_id}' disabled.\n  Reason: {reason}")
         except Exception as e:
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(
+                    "system.control.toggle_feature",
+                    {"module_id": module_id, "enabled": False},
+                    "error",
+                    1,
+                    duration_ms,
+                )
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
@@ -283,19 +336,26 @@ def register_reload_command(apcli_group: click.Group, executor: Any) -> None:
 
     @apcli_group.command("reload")
     @click.argument("module_id")
-    @click.option("--reason", required=True, help="Reason for reload (required for audit).")
+    @click.option("--reason", required=True, help="Reason for reload (recorded in module audit trail).")
     @click.option("--yes", "-y", is_flag=True, default=False, help="Skip approval prompt.")
     @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
     def reload_cmd(module_id: str, reason: str, yes: bool, output_format: str | None) -> None:
         """Hot-reload a module from disk."""
+        import time
+
         _check_system_approval(executor, "system.control.reload_module", yes)
         fmt = resolve_format(output_format)
+        audit_start = time.monotonic()
         try:
             result = _call_system_module(
                 executor,
                 "system.control.reload_module",
                 {"module_id": module_id, "reason": reason},
             )
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution("system.control.reload_module", {"module_id": module_id}, "success", 0, duration_ms)
             if fmt == "json" or not sys.stdout.isatty():
                 click.echo(json.dumps(result, indent=2, default=str))
             else:
@@ -306,6 +366,10 @@ def register_reload_command(apcli_group: click.Group, executor: Any) -> None:
                 click.echo(f"  Version: {prev} -> {new}")
                 click.echo(f"  Duration: {dur}ms")
         except Exception as e:
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution("system.control.reload_module", {"module_id": module_id}, "error", 1, duration_ms)
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
@@ -335,11 +399,13 @@ def register_config_command(apcli_group: click.Group, executor: Any) -> None:
     @config_group.command("set")
     @click.argument("key")
     @click.argument("value")
-    @click.option("--reason", required=True, help="Reason for config change (required for audit).")
+    @click.option("--reason", required=True, help="Reason for config change (recorded in module audit trail).")
     @click.option("-y", "--yes", "auto_approve", is_flag=True, default=False, help="Auto-approve.")
     @click.option("--format", "output_format", type=click.Choice(["table", "json"]), default=None)
     def config_set_cmd(key: str, value: str, reason: str, auto_approve: bool, output_format: str | None) -> None:
         """Update a runtime configuration value (requires approval)."""
+        import time
+
         _check_system_approval(executor, "system.control.update_config", auto_approve)
         fmt = resolve_format(output_format)
         try:
@@ -347,12 +413,17 @@ def register_config_command(apcli_group: click.Group, executor: Any) -> None:
         except (json.JSONDecodeError, ValueError):
             parsed_value = value
 
+        audit_start = time.monotonic()
         try:
             result = _call_system_module(
                 executor,
                 "system.control.update_config",
                 {"key": key, "value": parsed_value, "reason": reason},
             )
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution("system.control.update_config", {"key": key}, "success", 0, duration_ms)
             if fmt == "json" or not sys.stdout.isatty():
                 click.echo(json.dumps(result, indent=2, default=str))
             else:
@@ -362,6 +433,10 @@ def register_config_command(apcli_group: click.Group, executor: Any) -> None:
                 click.echo(f"  {old!r} -> {new!r}")
                 click.echo(f"  Reason: {reason}")
         except Exception as e:
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution("system.control.update_config", {"key": key}, "error", 1, duration_ms)
             click.echo(f"Error: {e}", err=True)
             sys.exit(1)
 
