@@ -71,15 +71,21 @@ def _resolve_node(
     # Handle allOf
     if "allOf" in node:
         merged: dict[str, Any] = {"properties": {}, "required": []}
+        # Merge sibling properties/required from the composing node itself first
+        # so the composition branches can extend (not overwrite) them.
+        if isinstance(node.get("properties"), dict):
+            merged["properties"].update(node["properties"])
+        if isinstance(node.get("required"), list):
+            merged["required"].extend(node["required"])
         for sub_schema in node["allOf"]:
             resolved = _resolve_node(sub_schema, defs, visited, depth + 1, max_depth, module_id)
             if "properties" in resolved:
                 merged["properties"].update(resolved["properties"])
             if "required" in resolved:
                 merged["required"].extend(resolved["required"])
-        # Copy non-composition keys
+        # Copy remaining non-composition keys (skip already-handled ones)
         for k, v in node.items():
-            if k != "allOf" and k not in merged:
+            if k not in ("allOf", "properties", "required") and k not in merged:
                 merged[k] = v
         return merged
 
@@ -87,6 +93,10 @@ def _resolve_node(
     for keyword in ("anyOf", "oneOf"):
         if keyword in node:
             merged = {"properties": {}, "required": []}
+            # Merge sibling properties from the composing node first.
+            if isinstance(node.get("properties"), dict):
+                merged["properties"].update(node["properties"])
+            sibling_required: list[str] = list(node["required"]) if isinstance(node.get("required"), list) else []
             all_required_sets: list[set[str]] = []
             for sub_schema in node[keyword]:
                 resolved = _resolve_node(sub_schema, defs, visited, depth + 1, max_depth, module_id)
@@ -94,14 +104,18 @@ def _resolve_node(
                     merged["properties"].update(resolved["properties"])
                 if "required" in resolved:
                     all_required_sets.append(set(resolved["required"]))
-            # Required = intersection of all branches
-            if all_required_sets:
-                merged["required"] = list(set.intersection(*all_required_sets))
-            else:
-                merged["required"] = []
-            # Copy non-composition keys
+            # Required = sibling required ∪ intersection of all branches
+            branch_required = list(set.intersection(*all_required_sets)) if all_required_sets else []
+            seen: set[str] = set()
+            combined_required: list[str] = []
+            for r in sibling_required + branch_required:
+                if r not in seen:
+                    seen.add(r)
+                    combined_required.append(r)
+            merged["required"] = combined_required
+            # Copy remaining non-composition keys
             for k, v in node.items():
-                if k != keyword and k not in merged:
+                if k not in (keyword, "properties", "required") and k not in merged:
                     merged[k] = v
             return merged
 

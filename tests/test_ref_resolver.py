@@ -189,3 +189,39 @@ class TestComposition:
         assert "id" in result["properties"]
         assert "extra" in result["properties"]
         assert "id" in result["required"]
+
+    def test_allof_preserves_sibling_properties(self):
+        """W2/W12: sibling 'properties' on the same node as allOf must not be
+        dropped — they are valid per JSON Schema and expected by click-option
+        generation (missing sibling props → missing Click flags)."""
+        schema = {
+            "allOf": [{"$ref": "#/$defs/Base"}],
+            "properties": {"extra": {"type": "string"}},
+            "required": ["extra"],
+            "$defs": {"Base": {"properties": {"id": {"type": "integer"}}}},
+        }
+        result = resolve_refs(schema, module_id="test")
+        assert "id" in result["properties"], "allOf-resolved property must be present"
+        assert "extra" in result["properties"], "sibling property must not be dropped"
+        assert "extra" in result["required"], "sibling required must not be dropped"
+
+    def test_anyof_preserves_sibling_properties(self):
+        """W12: same sibling-drop bug exists for anyOf."""
+        schema = {
+            "anyOf": [{"properties": {"a": {"type": "string"}}}],
+            "properties": {"extra": {"type": "boolean"}},
+            "required": ["extra"],
+        }
+        result = resolve_refs(schema, module_id="test")
+        assert "extra" in result["properties"], "sibling property must not be dropped by anyOf"
+        assert "a" in result["properties"], "anyOf-resolved property must be present"
+
+    def test_oneof_preserves_sibling_properties(self):
+        """W12: same sibling-drop bug exists for oneOf."""
+        schema = {
+            "oneOf": [{"properties": {"x": {"type": "integer"}}}],
+            "properties": {"flag": {"type": "boolean"}},
+        }
+        result = resolve_refs(schema, module_id="test")
+        assert "flag" in result["properties"], "sibling property must not be dropped by oneOf"
+        assert "x" in result["properties"], "oneOf-resolved property must be present"
