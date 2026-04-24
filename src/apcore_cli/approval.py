@@ -19,6 +19,17 @@ class ApprovalTimeoutError(Exception):
     pass
 
 
+class ApprovalDeniedError(Exception):
+    """Raised when an approval request is denied (rejected or pending).
+
+    The CLI entry points surface denial as ``sys.exit(46)``; this exception
+    exists for SDK callers of :class:`CliApprovalHandler` and is listed in
+    the :mod:`apcore_cli` public API per the v0.6.0 error-class surface.
+    """
+
+    pass
+
+
 def _get_annotation(annotations: Any, key: str, default: Any = None) -> Any:
     """Get an annotation value from either a dict or a ModuleAnnotations object."""
     if isinstance(annotations, dict):

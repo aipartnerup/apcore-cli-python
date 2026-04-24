@@ -4,8 +4,7 @@ import logging
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from apcore_cli.approval import ApprovalTimeoutError, check_approval
+from apcore_cli.approval import ApprovalDeniedError, ApprovalTimeoutError, check_approval
 
 
 def _make_module(requires_approval=None, approval_message=None):
@@ -156,3 +155,16 @@ class TestApprovalTimeoutError:
         assert issubclass(ApprovalTimeoutError, Exception)
         e = ApprovalTimeoutError()
         assert isinstance(e, Exception)
+
+
+class TestApprovalDeniedError:
+    """Public error-class surface — listed in v0.6.0 CLAUDE.md + spec."""
+
+    def test_approval_denied_error_is_exception(self):
+        assert issubclass(ApprovalDeniedError, Exception)
+        assert isinstance(ApprovalDeniedError("denied"), Exception)
+
+    def test_approval_denied_error_re_exported_from_package(self):
+        from apcore_cli import ApprovalDeniedError as ReExported
+
+        assert ReExported is ApprovalDeniedError

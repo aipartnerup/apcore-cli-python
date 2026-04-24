@@ -30,7 +30,7 @@ except (ImportError, AttributeError):
     pass  # apcore < 0.15.0 or not installed
 
 # Public API re-exports
-from apcore_cli.approval import ApprovalTimeoutError, CliApprovalHandler
+from apcore_cli.approval import ApprovalDeniedError, ApprovalTimeoutError, CliApprovalHandler
 from apcore_cli.builtin_group import (
     RESERVED_GROUP_NAMES,
     ApcliGroup,
@@ -70,6 +70,7 @@ __all__ = [
     "ConfigEncryptor",
     "Sandbox",
     # Error classes
+    "ApprovalDeniedError",
     "ApprovalTimeoutError",
     "AuthenticationError",
     "ConfigDecryptionError",
