@@ -343,6 +343,7 @@ def register_exec_command(
 
 def register_validate_command(apcli_group: click.Group, registry: Any, executor: Any) -> None:
     """Register the ``validate`` subcommand on the given group."""
+    from apcore_cli.cli import _ERROR_CODE_MAP, _emit_error_tty
 
     @apcli_group.command("validate")
     @click.argument("module_id")
@@ -364,8 +365,14 @@ def register_validate_command(apcli_group: click.Group, registry: Any, executor:
             sys.exit(44)
 
         merged = collect_input(stdin_input, {}, False) if stdin_input else {}
-        preflight = executor.validate(module_id, merged)
-        format_preflight_result(preflight, output_format)
+        try:
+            preflight = executor.validate(module_id, merged)
+            format_preflight_result(preflight, output_format)
+        except Exception as e:
+            code = getattr(e, "code", None)
+            exit_code = _ERROR_CODE_MAP.get(code, 1) if isinstance(code, str) else 1
+            _emit_error_tty(e, exit_code)
+            sys.exit(exit_code)
         sys.exit(0 if preflight.valid else _first_failed_exit_code(preflight))
 
     _ = validate_cmd

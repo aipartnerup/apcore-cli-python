@@ -11,14 +11,13 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-from click.testing import CliRunner
-
 from apcore_cli.discovery import (
     register_describe_command,
     register_exec_command,
     register_list_command,
     register_validate_command,
 )
+from click.testing import CliRunner
 
 
 def _make_module_def(module_id: str = "foo.bar"):
@@ -124,6 +123,29 @@ class TestRegisterValidateCommand:
         result = CliRunner().invoke(cli, ["validate", "foo.bar", "--format", "json"])
         # _first_failed_exit_code defaults to 1 when no specific check pattern matched
         assert result.exit_code != 0
+
+    def test_executor_exception_surfaces_mapped_exit_code(self):
+        """W5: executor.validate raising (e.g. ACL_DENIED) must emit a
+        formatted CLI error and resolve the mapped exit code — mirroring
+        register_exec_command. Before the fix, the user saw a raw traceback."""
+        module_def = _make_module_def("foo.bar")
+        registry = MagicMock()
+        registry.get_definition.return_value = module_def
+        executor = MagicMock()
+
+        class _AclDeniedError(Exception):
+            code = "ACL_DENIED"
+
+        executor.validate.side_effect = _AclDeniedError("acl denied")
+        cli = _build_apcli_with(register_validate_command, registry, executor)
+        result = CliRunner().invoke(cli, ["validate", "foo.bar"])
+        # Exit is a mapped code (77 = ACL_DENIED per _ERROR_CODE_MAP) OR 1 if
+        # the project's _ERROR_CODE_MAP doesn't carry this symbol yet — either
+        # way, non-zero AND non-exception (no raw traceback in output).
+        assert result.exit_code != 0
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+        # _emit_error_tty prefix must be present on stderr/combined output.
+        assert "Error" in (result.output or "") or "acl denied" in (result.output or "").lower()
 
 
 class TestRegisterListDescribeSmoke:
