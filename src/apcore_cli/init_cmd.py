@@ -184,10 +184,7 @@ def _create_binding_module(
     if not _refuse_if_exists(src_file, force):
         return
     src_content = (
-        f"def {func_name}() -> dict:\n"
-        f'    """{description}"""\n'
-        "    # TODO: implement\n"
-        '    return {"status": "ok"}\n'
+        f'def {func_name}() -> dict:\n    """{description}"""\n    # TODO: implement\n    return {{"status": "ok"}}\n'
     )
     src_file.write_text(src_content)
     click.echo(f"Created {src_file}")

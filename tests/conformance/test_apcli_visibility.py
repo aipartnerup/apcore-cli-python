@@ -236,7 +236,7 @@ class TestApcliVisibilityConformance:
 
         if yaml_include_list is not None:
             for name in yaml_include_list:
-                assert name in registered, f"[{scenario}] include list requires '{name}'; " f"got {sorted(registered)}"
+                assert name in registered, f"[{scenario}] include list requires '{name}'; got {sorted(registered)}"
             # Subcommands outside the include list (other than exec) must be
             # absent.
             allowed = set(yaml_include_list) | {"exec"}
