@@ -7,6 +7,7 @@ import logging
 import re
 import sys
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import click
@@ -984,7 +985,15 @@ def collect_input(
     cli_kwargs: dict[str, Any],
     large_input: bool = False,
 ) -> dict[str, Any]:
-    """Collect and merge input from STDIN and CLI flags."""
+    """Collect and merge input from STDIN, a file path, and CLI flags.
+
+    ``stdin_flag`` accepts three forms:
+      * ``None`` or empty — use CLI kwargs only.
+      * ``"-"`` — read JSON from STDIN (10 MB cap unless ``large_input``).
+      * any other string — treat as a file path; open and read JSON.
+
+    CLI flags override STDIN/file values for duplicate keys.
+    """
     # Remove None values from CLI kwargs
     cli_kwargs_non_none = {k: v for k, v in cli_kwargs.items() if v is not None}
 
@@ -1001,27 +1010,44 @@ def collect_input(
                 err=True,
             )
             sys.exit(2)
+        source_label = "STDIN"
+    else:
+        # File-path form.
+        try:
+            raw = Path(stdin_flag).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            click.echo(f"Error: --input file '{stdin_flag}' does not exist.", err=True)
+            sys.exit(2)
+        except OSError as e:
+            click.echo(f"Error: could not read --input file '{stdin_flag}': {e}.", err=True)
+            sys.exit(2)
+        raw_size = len(raw.encode("utf-8"))
+        if raw_size > 10_485_760 and not large_input:
+            click.echo(
+                f"Error: --input file '{stdin_flag}' exceeds 10MB limit. Use --large-input to override.",
+                err=True,
+            )
+            sys.exit(2)
+        source_label = f"--input file '{stdin_flag}'"
 
-        if not raw:
-            stdin_data: dict[str, Any] = {}
-        else:
-            try:
-                stdin_data = json.loads(raw)
-            except json.JSONDecodeError as e:
-                click.echo(
-                    f"Error: STDIN does not contain valid JSON: {e.msg}.",
-                    err=True,
-                )
-                sys.exit(2)
+    if not raw:
+        stdin_data: dict[str, Any] = {}
+    else:
+        try:
+            stdin_data = json.loads(raw)
+        except json.JSONDecodeError as e:
+            click.echo(
+                f"Error: {source_label} does not contain valid JSON: {e.msg}.",
+                err=True,
+            )
+            sys.exit(2)
 
-            if not isinstance(stdin_data, dict):
-                click.echo(
-                    f"Error: STDIN JSON must be an object, got {type(stdin_data).__name__}.",
-                    err=True,
-                )
-                sys.exit(2)
+        if not isinstance(stdin_data, dict):
+            click.echo(
+                f"Error: {source_label} JSON must be an object, got {type(stdin_data).__name__}.",
+                err=True,
+            )
+            sys.exit(2)
 
-        # CLI flags override STDIN for duplicate keys
-        return {**stdin_data, **cli_kwargs_non_none}
-
-    return cli_kwargs_non_none
+    # CLI flags override STDIN/file for duplicate keys
+    return {**stdin_data, **cli_kwargs_non_none}

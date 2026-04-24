@@ -5,7 +5,6 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-
 from apcore_cli.cli import (
     GroupedModuleGroup,
     LazyModuleGroup,
@@ -224,6 +223,56 @@ class TestCollectInput:
         result = collect_input("-", {})
         assert result == {}
 
+    # W1: --input file-path form.
+
+    def test_collect_input_reads_json_file(self, tmp_path):
+        """W1: non-'-' value is treated as a file path and parsed as JSON."""
+        f = tmp_path / "payload.json"
+        f.write_text('{"a": 1, "b": "x"}')
+        result = collect_input(str(f), {})
+        assert result == {"a": 1, "b": "x"}
+
+    def test_collect_input_file_cli_overrides(self, tmp_path):
+        """W1: CLI kwargs still override file keys, matching stdin semantics."""
+        f = tmp_path / "payload.json"
+        f.write_text('{"a": 1, "b": "x"}')
+        result = collect_input(str(f), {"a": 99})
+        assert result == {"a": 99, "b": "x"}
+
+    def test_collect_input_file_missing_exits_2(self, tmp_path):
+        """W1: missing file must emit a clear error and exit 2 (not stacktrace)."""
+        with pytest.raises(SystemExit) as exc_info:
+            collect_input(str(tmp_path / "does-not-exist.json"), {})
+        assert exc_info.value.code == 2
+
+    def test_collect_input_file_invalid_json_exits_2(self, tmp_path):
+        f = tmp_path / "bad.json"
+        f.write_text("{not json")
+        with pytest.raises(SystemExit) as exc_info:
+            collect_input(str(f), {})
+        assert exc_info.value.code == 2
+
+    def test_collect_input_file_non_object_exits_2(self, tmp_path):
+        f = tmp_path / "arr.json"
+        f.write_text("[1, 2, 3]")
+        with pytest.raises(SystemExit) as exc_info:
+            collect_input(str(f), {})
+        assert exc_info.value.code == 2
+
+    def test_collect_input_file_size_cap(self, tmp_path):
+        """W1: file path is subject to the same 10 MB cap as STDIN."""
+        f = tmp_path / "big.json"
+        f.write_text('{"x": "' + "a" * (11 * 1024 * 1024) + '"}')
+        with pytest.raises(SystemExit) as exc_info:
+            collect_input(str(f), {}, large_input=False)
+        assert exc_info.value.code == 2
+
+    def test_collect_input_file_size_cap_bypassed_by_large_input(self, tmp_path):
+        f = tmp_path / "big.json"
+        f.write_text('{"x": "' + "a" * (11 * 1024 * 1024) + '"}')
+        result = collect_input(str(f), {}, large_input=True)
+        assert "x" in result
+
 
 class TestValidateModuleId:
     """Task 4: Module ID validation."""
@@ -276,9 +325,8 @@ class TestMainEntryPoint:
     """Task 5: main() entry point and CLI integration."""
 
     def test_main_help_flag(self, tmp_path):
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path)), ["--help"])
@@ -286,9 +334,8 @@ class TestMainEntryPoint:
         assert "apcore-cli" in result.output.lower() or "apcore" in result.output.lower()
 
     def test_main_version_flag(self, tmp_path):
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         runner = CliRunner()
         result = runner.invoke(create_cli(extensions_dir=str(tmp_path), prog_name="apcore-cli"), ["--version"])
@@ -300,7 +347,6 @@ class TestMainEntryPoint:
 
     def test_main_extensions_dir_not_found(self):
         import pytest
-
         from apcore_cli.__main__ import create_cli
 
         with pytest.raises(SystemExit) as exc_info:
@@ -308,9 +354,8 @@ class TestMainEntryPoint:
         assert exc_info.value.code == 47
 
     def test_main_extensions_dir_valid(self, tmp_path):
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         # Create a minimal extensions dir
         (tmp_path / "apcore.yaml").write_text("modules: {}\n")
@@ -324,9 +369,8 @@ class TestMainEntryPoint:
     def test_log_level_flag_takes_effect(self, tmp_path):
         import logging
 
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         original_level = logging.getLogger().level
         try:
@@ -358,9 +402,8 @@ class TestMainEntryPoint:
     def test_cli_logging_level_takes_priority_over_global(self, tmp_path, monkeypatch):
         import logging
 
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         original_level = logging.getLogger().level
         try:
@@ -378,9 +421,8 @@ class TestMainEntryPoint:
     def test_cli_logging_level_fallback_to_global(self, tmp_path, monkeypatch):
         import logging
 
-        from click.testing import CliRunner
-
         from apcore_cli.__main__ import create_cli
+        from click.testing import CliRunner
 
         # CLI-specific not set — must fall back to global
         monkeypatch.delenv("APCORE_CLI_LOGGING_LEVEL", raising=False)
