@@ -2,9 +2,8 @@
 
 import click
 import pytest
-from click.testing import CliRunner
-
 from apcore_cli.init_cmd import register_init_command
+from click.testing import CliRunner
 
 
 @pytest.fixture
@@ -80,3 +79,56 @@ class TestInitModule:
         assert "decorator" in result.output
         assert "convention" in result.output
         assert "binding" in result.output
+
+
+class TestInitModuleForce:
+    """W4: init module must refuse to clobber existing files unless --force is set."""
+
+    def test_rerun_convention_without_force_refuses(self, cli, tmp_path):
+        runner = CliRunner()
+        # First run — creates the file
+        r1 = runner.invoke(cli, ["init", "module", "ops.deploy", "--dir", str(tmp_path)])
+        assert r1.exit_code == 0
+        files = list(tmp_path.rglob("*.py"))
+        assert len(files) == 1
+        target = files[0]
+        target.write_text("# user edits\ndef deploy(): return {'custom': True}\n")
+        original = target.read_text()
+
+        # Second run — should refuse to overwrite
+        r2 = runner.invoke(cli, ["init", "module", "ops.deploy", "--dir", str(tmp_path)])
+        assert r2.exit_code == 0, r2.output  # command itself doesn't abort
+        assert "already exists" in r2.output or "already exists" in (r2.stderr_bytes or b"").decode()
+        assert target.read_text() == original, "User edits must be preserved"
+
+    def test_rerun_decorator_without_force_refuses(self, cli, tmp_path):
+        runner = CliRunner()
+        r1 = runner.invoke(cli, ["init", "module", "ops.deploy", "--style", "decorator", "--dir", str(tmp_path)])
+        assert r1.exit_code == 0
+        files = list(tmp_path.rglob("*.py"))
+        target = files[0]
+        target.write_text("# user impl")
+        runner.invoke(cli, ["init", "module", "ops.deploy", "--style", "decorator", "--dir", str(tmp_path)])
+        assert target.read_text() == "# user impl"
+
+    def test_rerun_with_force_overwrites(self, cli, tmp_path):
+        runner = CliRunner()
+        r1 = runner.invoke(cli, ["init", "module", "ops.deploy", "--dir", str(tmp_path)])
+        assert r1.exit_code == 0
+        files = list(tmp_path.rglob("*.py"))
+        target = files[0]
+        target.write_text("# user edits")
+        r2 = runner.invoke(cli, ["init", "module", "ops.deploy", "--dir", str(tmp_path), "--force"])
+        assert r2.exit_code == 0
+        assert target.read_text() != "# user edits"
+        assert "TODO" in target.read_text()
+
+    def test_rerun_binding_yaml_without_force_refuses(self, cli, tmp_path):
+        runner = CliRunner()
+        r1 = runner.invoke(cli, ["init", "module", "ops.deploy", "--style", "binding", "--dir", str(tmp_path)])
+        assert r1.exit_code == 0
+        yaml_files = list(tmp_path.rglob("*.yaml"))
+        target = yaml_files[0]
+        target.write_text("# hand-edited")
+        runner.invoke(cli, ["init", "module", "ops.deploy", "--style", "binding", "--dir", str(tmp_path)])
+        assert target.read_text() == "# hand-edited"
