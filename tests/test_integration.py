@@ -5,11 +5,10 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-from click.testing import CliRunner
-
 from apcore_cli.cli import LazyModuleGroup, build_module_command, set_audit_logger
 from apcore_cli.discovery import register_discovery_commands
 from apcore_cli.shell import register_shell_commands
+from click.testing import CliRunner
 
 
 def _make_module_def(
@@ -210,7 +209,6 @@ class TestAuditLogIntegration:
 
     def test_audit_log_on_error(self, tmp_path):
         from apcore.errors import ModuleExecuteError
-
         from apcore_cli.security.audit import AuditLogger
 
         log_path = tmp_path / "audit.jsonl"
@@ -293,7 +291,6 @@ class TestConfigResolverWiring:
 
     def test_create_cli_uses_config_resolver(self, tmp_path):
         import pytest
-
         from apcore_cli.__main__ import create_cli
 
         # When no extensions_dir override and default dir doesn't exist,
@@ -304,7 +301,6 @@ class TestConfigResolverWiring:
 
     def test_create_cli_override_bypasses_config(self, tmp_path):
         import pytest
-
         from apcore_cli.__main__ import create_cli
 
         with pytest.raises(SystemExit) as exc_info:

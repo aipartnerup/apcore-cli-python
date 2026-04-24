@@ -30,9 +30,8 @@ from unittest.mock import MagicMock
 
 import click
 import pytest
-from click.testing import CliRunner
-
 from apcore_cli.factory import create_cli
+from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
 # Fixture location — matches the TS test's APCORE_CLI_SPEC_REPO convention.

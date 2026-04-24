@@ -11,11 +11,10 @@ import sys
 import click
 import pytest
 from apcore import Executor, Registry, module
-from click.testing import CliRunner
-
 from apcore_cli.cli import LazyModuleGroup, build_module_command, set_audit_logger
 from apcore_cli.discovery import register_discovery_commands
 from apcore_cli.shell import register_shell_commands
+from click.testing import CliRunner
 
 # ---------------------------------------------------------------------------
 # Real apcore module definitions

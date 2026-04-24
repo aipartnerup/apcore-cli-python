@@ -4,9 +4,8 @@ import json
 from unittest.mock import MagicMock
 
 import click
-from click.testing import CliRunner
-
 from apcore_cli.discovery import register_discovery_commands
+from click.testing import CliRunner
 
 
 def _make_mock_module(module_id, description="A module.", tags=None):

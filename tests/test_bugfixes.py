@@ -5,9 +5,8 @@ import subprocess
 import sys
 from unittest.mock import MagicMock
 
-from click.testing import CliRunner
-
 from apcore_cli.cli import build_module_command, set_audit_logger
+from click.testing import CliRunner
 
 
 class TestMED1ExtensionsDirFlag:

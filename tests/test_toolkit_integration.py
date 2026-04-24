@@ -14,7 +14,6 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-
 from apcore_cli.factory import _apply_toolkit_integration
 
 
@@ -259,9 +258,8 @@ class TestAllowedPrefixFlag:
 class TestPaginatedAnnotationFilter:
     def test_paginated_is_a_valid_choice(self):
         import click
-        from click.testing import CliRunner
-
         from apcore_cli.discovery import register_list_command
+        from click.testing import CliRunner
 
         registry = MagicMock()
 

@@ -12,9 +12,8 @@ import json
 from unittest.mock import MagicMock
 
 import click
-from click.testing import CliRunner
-
 from apcore_cli.discovery import register_list_command
+from click.testing import CliRunner
 
 
 class _Mod:

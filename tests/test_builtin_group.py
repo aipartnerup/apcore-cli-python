@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 
 import pytest
-
 from apcore_cli.builtin_group import (
     APCLI_SUBCOMMAND_NAMES,
     RESERVED_GROUP_NAMES,
