@@ -28,11 +28,11 @@
 
 - Python >= 3.11
 - Key dependencies: click >= 8.1, rich >= 13.0, jsonschema >= 4.20, pyyaml >= 6.0, keyring >= 24, cryptography >= 41
-- Runtime: apcore >= 0.17.1 (v0.6.0 bump, was 0.15.1)
+- Runtime: apcore >= 0.19.0 (v0.7.0 bump, was 0.17.1)
 - Optional: apcore-toolkit >= 0.4 (install via `pip install apcore-cli[toolkit]`)
 - Dev: pytest, pytest-asyncio, pytest-cov, mypy, ruff
 
-## v0.6.0 Conventions
+## v0.7.0 Conventions
 
 - Public surface (`__init__.py`): `__version__`, `create_cli`, `ExposureFilter`,
   `ApcliGroup`, `ApcliMode`, `RESERVED_GROUP_NAMES`, `CliApprovalHandler`,
@@ -44,8 +44,10 @@
   submodule path (e.g., `from apcore_cli.cli import GroupedModuleGroup`).
 - ExposureFilter + `expose=` kwarg on create_cli (FE-12).
 - `extra_commands=[...]` kwarg on create_cli as the FE-11 extension point (with
-  collision detection against BUILTIN_COMMANDS).
+  collision detection against RESERVED_GROUP_NAMES — `BUILTIN_COMMANDS` retired v0.7.0).
 - Default click Group class is `GroupedModuleGroup` (multi-level grouping since v0.3.0).
+- All apcore-cli commands live under the `apcli` group (FE-13). Deprecation shims
+  remain at root level for back-compat until v0.8.
 - `system_cmd` module registers runtime system commands (health/usage/enable/disable/
   reload/config) — FE-11.
 - `strategy` module registers describe-pipeline + --strategy flag — FE-11.
