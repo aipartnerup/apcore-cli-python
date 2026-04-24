@@ -198,8 +198,8 @@ def format_module_detail(module_def: ModuleDescriptor, format: str) -> None:
             for k, v in vars(module_def).items():
                 if (k.startswith("x_") or k.startswith("x-")) and k not in x_fields:
                     x_fields[k] = v
-        except TypeError:
-            pass
+        except TypeError as e:
+            logger.debug("Could not extract x- fields via vars(): %s", e)
         if x_fields:
             click.echo("\nExtension Metadata:")
             for k, v in x_fields.items():
@@ -238,8 +238,8 @@ def format_module_detail(module_def: ModuleDescriptor, format: str) -> None:
             for k, v in vars(module_def).items():
                 if (k.startswith("x_") or k.startswith("x-")) and k not in result:
                     result[k] = v
-        except TypeError:
-            pass
+        except TypeError as e:
+            logger.debug("Could not extract x- fields via vars(): %s", e)
 
         click.echo(json.dumps(result, indent=2))
 
