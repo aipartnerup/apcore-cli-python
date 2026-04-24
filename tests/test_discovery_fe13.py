@@ -7,7 +7,7 @@ failure paths that aren't exercised by the batched-wrapper tests.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import click
 import pytest
@@ -100,6 +100,39 @@ class TestRegisterExecCommand:
         result = CliRunner().invoke(cli, ["exec", "foo.bar", "--yes"])
         # _ERROR_CODE_MAP["MODULE_EXECUTE_ERROR"] = 1
         assert result.exit_code == 1
+
+    def test_exec_cmd_writes_audit_log_on_success(self):
+        """W1 (D9): exec_cmd must call _audit_logger.log_execution on success,
+        matching the audit trail written by build_module_command."""
+        module_def = _make_module_def("foo.bar")
+        registry = MagicMock()
+        registry.get_definition.return_value = module_def
+        executor = MagicMock()
+        executor.call.return_value = {"result": "ok"}
+        audit_logger = MagicMock()
+        with patch("apcore_cli.cli._audit_logger", audit_logger):
+            cli = _build_apcli_with(register_exec_command, registry, executor)
+            CliRunner().invoke(cli, ["exec", "foo.bar", "--yes", "--format", "json"])
+        audit_logger.log_execution.assert_called_once()
+        args = audit_logger.log_execution.call_args[0]
+        assert args[0] == "foo.bar"
+        assert args[2] == "success"
+
+    def test_exec_cmd_writes_audit_log_on_error(self):
+        """W1 (D9): exec_cmd must call _audit_logger.log_execution on error too."""
+        module_def = _make_module_def("foo.bar")
+        registry = MagicMock()
+        registry.get_definition.return_value = module_def
+        executor = MagicMock()
+        executor.call.side_effect = RuntimeError("boom")
+        audit_logger = MagicMock()
+        with patch("apcore_cli.cli._audit_logger", audit_logger):
+            cli = _build_apcli_with(register_exec_command, registry, executor)
+            CliRunner().invoke(cli, ["exec", "foo.bar", "--yes"])
+        audit_logger.log_execution.assert_called_once()
+        args = audit_logger.log_execution.call_args[0]
+        assert args[0] == "foo.bar"
+        assert args[2] == "error"
 
 
 class TestRegisterValidateCommand:

@@ -22,6 +22,7 @@ from typing import Any
 
 import click
 
+import apcore_cli.cli as _cli_module
 from apcore_cli.cli import (
     _first_failed_exit_code,
     collect_input,
@@ -326,15 +327,26 @@ def register_exec_command(
                 sys.exit(2)
             merged = parsed
 
+        import time
+
+        audit_start = time.monotonic()
         try:
             timeout = approval_timeout if approval_timeout is not None else 60
             check_approval(module_def, auto_approve=auto_approve, timeout=timeout)
             result = executor.call(module_id, merged)
             fmt = resolve_format(output_format)
             format_exec_result(result, fmt, fields)
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(module_id, merged, "success", 0, duration_ms)
         except Exception as e:
             code = getattr(e, "code", None)
             exit_code = _ERROR_CODE_MAP.get(code, 1) if isinstance(code, str) else 1
+            duration_ms = int((time.monotonic() - audit_start) * 1000)
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(module_id, merged, "error", exit_code, duration_ms)
             _emit_error_tty(e, exit_code)
             sys.exit(exit_code)
 
