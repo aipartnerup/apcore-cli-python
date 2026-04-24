@@ -710,10 +710,7 @@ def build_module_command(
                 )
                 duration_ms = int((time.monotonic() - audit_start) * 1000)
 
-                if _audit_logger is not None:
-                    _audit_logger.log_execution(module_id, merged, "success", 0, duration_ms)
-
-                # Print result
+                # Print result (before audit so a formatter raise doesn't double-log)
                 if output_format == "json" or not sys.stdout.isatty():
                     # Merge _trace into JSON output
                     trace_data = {
@@ -754,6 +751,11 @@ def build_module_command(
                             dur = f"{s.duration_ms:.1f}ms"
                             reason = ""
                         click.echo(f"  {sym} {s.name:<24} {dur:>8}{reason}", err=True)
+
+                # Audit after formatting — formatter raise will not produce a
+                # duplicate success+error pair
+                if _audit_logger is not None:
+                    _audit_logger.log_execution(module_id, merged, "success", 0, duration_ms)
                 return
 
             # -- Standard execution (with optional strategy) --
@@ -779,12 +781,13 @@ def build_module_command(
                 result = sandbox.execute(module_id, merged, executor)
             duration_ms = int((time.monotonic() - audit_start) * 1000)
 
-            # 6. Audit log (success)
+            # 6. Format and print result (before audit so a formatter raise doesn't
+            #    produce a spurious success entry followed by an error entry)
+            format_exec_result(result, output_format, fields=output_fields)
+
+            # 7. Audit log (success) — only reached if formatting did not raise
             if _audit_logger is not None:
                 _audit_logger.log_execution(module_id, merged, "success", 0, duration_ms)
-
-            # 7. Format and print result
-            format_exec_result(result, output_format, fields=output_fields)
 
         except KeyboardInterrupt:
             click.echo("Execution cancelled.", err=True)
