@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import logging
 import os
@@ -27,7 +28,14 @@ class ConfigEncryptor:
             kr.set_password(self.SERVICE_NAME, key, value)
             return f"keyring:{key}"
         else:
-            logger.warning("OS keyring unavailable. Using file-based encryption.")
+            logger.warning(
+                "OS keyring unavailable. Falling back to file-based obfuscation "
+                "with a host+user-derived key. This is NOT strong encryption: any "
+                "local user who can read the config AND observe hostname+username "
+                "can recover the value. Install a real keyring backend "
+                "(macOS Keychain / GNOME Keyring / KWallet / Windows Credential "
+                "Manager) for real protection."
+            )
             ciphertext = self._aes_encrypt(value)
             return f"enc:{base64.b64encode(ciphertext).decode()}"
 
@@ -41,10 +49,10 @@ class ConfigEncryptor:
                 raise ConfigDecryptionError(f"Keyring entry not found for '{ref_key}'.")
             return result
         elif config_value.startswith("enc:"):
-            ciphertext = base64.b64decode(config_value[len("enc:") :])
             try:
+                ciphertext = base64.b64decode(config_value[len("enc:") :])
                 return self._aes_decrypt(ciphertext)
-            except (InvalidTag, ValueError) as exc:
+            except (InvalidTag, ValueError, binascii.Error, UnicodeDecodeError) as exc:
                 raise ConfigDecryptionError(
                     f"Failed to decrypt configuration value '{key}'. Re-configure with 'apcore-cli config set {key}'."
                 ) from exc
