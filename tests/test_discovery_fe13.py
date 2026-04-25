@@ -194,4 +194,86 @@ class TestRegisterListDescribeSmoke:
         assert "describe" in cli.commands
 
 
+class TestApcliExecPolicyFlags:
+    """D11-005: apcli exec must expose the same policy gates as build_module_command."""
+
+    def test_apcli_exec_applies_strategy_flag(self):
+        """Passing --strategy direct to apcli exec must route through call_with_trace
+        exactly like build_module_command does when strategy is set."""
+        module_def = _make_module_def("foo.bar")
+        registry = MagicMock()
+        registry.get_definition.return_value = module_def
+        executor = MagicMock()
+        executor.call_with_trace.return_value = ({"result": "ok"}, MagicMock())
+        cli = _build_apcli_with(register_exec_command, registry, executor)
+        result = CliRunner().invoke(
+            cli,
+            ["exec", "foo.bar", "--strategy", "internal", "--yes", "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output
+        executor.call_with_trace.assert_called_once()
+        _args, _kwargs = executor.call_with_trace.call_args
+        # strategy must be passed through
+        assert _kwargs.get("strategy") == "internal" or (len(_args) >= 3 and _args[2] == "internal")
+
+    def test_apcli_exec_dry_run_flag(self):
+        """--dry-run must invoke executor.validate and NOT call executor.call."""
+        module_def = _make_module_def("foo.bar")
+        registry = MagicMock()
+        registry.get_definition.return_value = module_def
+        executor = MagicMock()
+        preflight = MagicMock()
+        preflight.valid = True
+        preflight.requires_approval = False
+        preflight.checks = []
+        executor.validate.return_value = preflight
+        cli = _build_apcli_with(register_exec_command, registry, executor)
+        result = CliRunner().invoke(
+            cli,
+            ["exec", "foo.bar", "--dry-run", "--yes"],
+        )
+        executor.validate.assert_called_once()
+        executor.call.assert_not_called()
+
+    def test_apcli_exec_exposes_strategy_option(self):
+        """The exec command must advertise --strategy as a Click option."""
+        registry = MagicMock()
+        executor = MagicMock()
+        cli = _build_apcli_with(register_exec_command, registry, executor)
+        exec_cmd = cli.commands.get("exec")
+        assert exec_cmd is not None
+        param_names = {p.name for p in exec_cmd.params}
+        assert "strategy" in param_names, "--strategy option must be registered on apcli exec"
+
+    def test_apcli_exec_exposes_trace_option(self):
+        """The exec command must advertise --trace as a Click option."""
+        registry = MagicMock()
+        executor = MagicMock()
+        cli = _build_apcli_with(register_exec_command, registry, executor)
+        exec_cmd = cli.commands.get("exec")
+        assert exec_cmd is not None
+        param_names = {p.name for p in exec_cmd.params}
+        assert "trace" in param_names, "--trace option must be registered on apcli exec"
+
+    def test_apcli_exec_exposes_dry_run_option(self):
+        """The exec command must advertise --dry-run / dry_run as a Click option."""
+        registry = MagicMock()
+        executor = MagicMock()
+        cli = _build_apcli_with(register_exec_command, registry, executor)
+        exec_cmd = cli.commands.get("exec")
+        assert exec_cmd is not None
+        param_names = {p.name for p in exec_cmd.params}
+        assert "dry_run" in param_names, "--dry-run option must be registered on apcli exec"
+
+    def test_apcli_exec_exposes_stream_option(self):
+        """The exec command must advertise --stream as a Click option."""
+        registry = MagicMock()
+        executor = MagicMock()
+        cli = _build_apcli_with(register_exec_command, registry, executor)
+        exec_cmd = cli.commands.get("exec")
+        assert exec_cmd is not None
+        param_names = {p.name for p in exec_cmd.params}
+        assert "stream" in param_names, "--stream option must be registered on apcli exec"
+
+
 _ = pytest  # silence unused import

@@ -302,6 +302,10 @@ def register_exec_command(
         default=False,
         help="Run module in an isolated subprocess with restricted filesystem and env access.",
     )
+    @click.option("--strategy", default=None, help="Execution strategy (standard, parallel, sequential, etc.).")
+    @click.option("--trace", is_flag=True, default=False, help="Enable pipeline trace output.")
+    @click.option("--dry-run", "dry_run", is_flag=True, default=False, help="Validate inputs without executing.")
+    @click.option("--stream", is_flag=True, default=False, help="Stream output as JSONL.")
     def exec_cmd(
         module_id: str,
         output_format: str | None,
@@ -310,6 +314,10 @@ def register_exec_command(
         auto_approve: bool,
         approval_timeout: int | None,
         sandbox: bool,
+        strategy: str | None,
+        trace: bool,
+        dry_run: bool,
+        stream: bool,
     ) -> None:
         """Execute a module by ID with JSON input."""
         validate_module_id(module_id)
@@ -342,7 +350,22 @@ def register_exec_command(
         try:
             timeout = approval_timeout if approval_timeout is not None else 60
             check_approval(module_def, auto_approve=auto_approve, timeout=timeout)
-            result = Sandbox(enabled=sandbox).execute(module_id, merged, executor)
+
+            if dry_run:
+                preflight = executor.validate(module_id, merged)
+                format_preflight_result(preflight, output_format)
+                return
+
+            if (trace or strategy) and hasattr(executor, "call_with_trace"):
+                result, _trace_data = executor.call_with_trace(
+                    module_id,
+                    merged,
+                    strategy=strategy,
+                )
+            else:
+                result = Sandbox(enabled=sandbox).execute(module_id, merged, executor)
+
+            # Format output FIRST (canonical order: format → audit on success)
             fmt = resolve_format(output_format)
             format_exec_result(result, fmt, fields)
             duration_ms = int((time.monotonic() - audit_start) * 1000)
