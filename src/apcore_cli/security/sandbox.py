@@ -41,7 +41,8 @@ class SchemaValidationError(Exception):
 
 
 # Env forwarding strategy (mirrors Rust spec §4.4 and apcore-cli/docs/features/security.md):
-# Allow: PATH, PYTHONPATH, LANG, LC_ALL + all APCORE_* vars.
+# Allow: PATH, LANG, LC_ALL + all APCORE_* vars.
+# PYTHONPATH is intentionally excluded (D10-010) — it must not cross the sandbox boundary.
 # Deny prefix: APCORE_AUTH_ — credentials must not cross the sandbox trust boundary.
 _SANDBOX_ALLOW_KEYS = ("PATH", "LANG", "LC_ALL")
 _SANDBOX_ALLOW_PREFIX = "APCORE_"
