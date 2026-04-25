@@ -60,3 +60,16 @@ class TestAuthProvider:
         config = _make_config()
         auth = AuthProvider(config)
         auth.handle_response(200)  # No error
+
+    def test_decryption_error_wrapped_as_authentication_error(self):
+        """A-D-009: ConfigDecryptionError must not leak past AuthProvider boundary."""
+        from apcore_cli.security.config_encryptor import ConfigDecryptionError
+
+        config = _make_config("enc:v2:bad_payload")
+        encryptor = MagicMock()
+        encryptor.retrieve.side_effect = ConfigDecryptionError("bad decrypt")
+        config.encryptor = encryptor
+        auth = AuthProvider(config)
+        # Must raise AuthenticationError, not ConfigDecryptionError
+        with pytest.raises(AuthenticationError, match="Failed to decrypt"):
+            auth.get_api_key()
