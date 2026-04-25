@@ -61,7 +61,12 @@ class AuthProvider:
                 "Remote registry requires authentication. "
                 "Set --api-key, APCORE_AUTH_API_KEY, or auth.api_key in config."
             )
-        headers["Authorization"] = f"Bearer {key}"
+        if "\r" in key or "\n" in key:
+            raise AuthenticationError(
+                "Malformed API key: contains invalid characters (CR/LF). "
+                "Re-configure with 'apcore-cli config set auth.api_key'."
+            )
+        headers["Authorization"] = f"Bearer {key.strip()}"
         return headers
 
     def handle_response(self, status_code: int) -> None:
