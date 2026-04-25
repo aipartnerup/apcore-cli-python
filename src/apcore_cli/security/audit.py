@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import logging
@@ -23,10 +24,8 @@ class AuditLogger:
 
     def _ensure_directory(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        try:
+        with contextlib.suppress(OSError):
             os.chmod(self._path.parent, 0o700)
-        except OSError:
-            pass
 
     def log_execution(
         self,
@@ -48,10 +47,8 @@ class AuditLogger:
         try:
             with open(self._path, "a") as f:
                 f.write(json.dumps(entry) + "\n")
-            try:
+            with contextlib.suppress(OSError):
                 os.chmod(self._path, 0o600)
-            except OSError:
-                pass
         except OSError as e:
             logger.warning("Could not write audit log: %s", e)
 

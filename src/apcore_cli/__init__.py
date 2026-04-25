@@ -45,7 +45,7 @@ from apcore_cli.schema_parser import schema_to_click_options
 from apcore_cli.security.audit import AuditLogger
 from apcore_cli.security.auth import AuthenticationError, AuthProvider
 from apcore_cli.security.config_encryptor import ConfigDecryptionError, ConfigEncryptor
-from apcore_cli.security.sandbox import ModuleExecutionError, ModuleNotFoundError, SchemaValidationError, Sandbox
+from apcore_cli.security.sandbox import ModuleExecutionError, ModuleNotFoundError, Sandbox, SchemaValidationError
 
 __all__ = [
     "__version__",

@@ -167,15 +167,10 @@ class ApcliGroup:
         ``try_from_yaml()`` surfaces the error so callers can decide.
         """
         if config is not None and not isinstance(config, bool | dict):
-            return None, (
-                f"apcore.yaml 'apcli:' must be a bool, mapping, or null; "
-                f"got {type(config).__name__}"
-            )
+            return None, (f"apcore.yaml 'apcli:' must be a bool, mapping, or null; " f"got {type(config).__name__}")
         if isinstance(config, dict):
             raw_mode = config.get("mode")
-            if raw_mode is not None and (
-                not isinstance(raw_mode, str) or raw_mode not in _VALID_USER_MODES
-            ):
+            if raw_mode is not None and (not isinstance(raw_mode, str) or raw_mode not in _VALID_USER_MODES):
                 return None, f"Invalid apcli mode: '{raw_mode}'. Must be one of: all, none, include, exclude."
         return cls._build(config, registry_injected=registry_injected, from_cli_config=False), None
 

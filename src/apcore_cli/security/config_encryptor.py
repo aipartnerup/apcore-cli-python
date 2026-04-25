@@ -49,14 +49,14 @@ class ConfigEncryptor:
         if config_value.startswith("keyring:"):
             import keyring as kr
 
-            ref_key = config_value[len("keyring:"):]
+            ref_key = config_value[len("keyring:") :]
             result = kr.get_password(self.SERVICE_NAME, ref_key)
             if result is None:
                 raise ConfigDecryptionError(f"Keyring entry not found for '{ref_key}'.")
             return result
         elif config_value.startswith("enc:v2:"):
             try:
-                data = base64.b64decode(config_value[len("enc:v2:"):])
+                data = base64.b64decode(config_value[len("enc:v2:") :])
                 return self._aes_decrypt(data)
             except (InvalidTag, ValueError, binascii.Error, UnicodeDecodeError) as exc:
                 raise ConfigDecryptionError(
@@ -64,7 +64,7 @@ class ConfigEncryptor:
                 ) from exc
         elif config_value.startswith("enc:"):
             try:
-                data = base64.b64decode(config_value[len("enc:"):])
+                data = base64.b64decode(config_value[len("enc:") :])
                 return self._aes_decrypt_v1(data)
             except (InvalidTag, ValueError, binascii.Error, UnicodeDecodeError, ConfigDecryptionError) as exc:
                 raise ConfigDecryptionError(

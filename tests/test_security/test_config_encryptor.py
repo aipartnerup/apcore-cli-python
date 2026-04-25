@@ -112,6 +112,7 @@ class TestConfigEncryptor:
         import hashlib as _hl
         import os as _os
         import socket as _sock
+
         from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
         hostname = _sock.gethostname()

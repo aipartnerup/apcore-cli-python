@@ -45,12 +45,12 @@ class AuthProvider:
         result = self._config.resolve("auth.api_key", cli_flag="--api-key", env_var="APCORE_AUTH_API_KEY")
         if result is not None and (result.startswith("keyring:") or result.startswith("enc:")):
             from apcore_cli.security.config_encryptor import ConfigDecryptionError
+
             try:
                 result = self._get_encryptor().retrieve(result, "auth.api_key")
             except ConfigDecryptionError as exc:
                 raise AuthenticationError(
-                    "Failed to decrypt stored API key. "
-                    "Re-configure with 'apcore-cli config set auth.api_key'."
+                    "Failed to decrypt stored API key. " "Re-configure with 'apcore-cli config set auth.api_key'."
                 ) from exc
         return result
 
