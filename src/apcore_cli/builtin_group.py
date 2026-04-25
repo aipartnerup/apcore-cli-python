@@ -138,7 +138,8 @@ class ApcliGroup:
         """Tier 3 constructor — value came from ``apcore.yaml``.
 
         Env var (Tier 2) may override the yaml-supplied mode when
-        ``disable_env`` is not set.
+        ``disable_env`` is not set. On invalid input, logs a WARNING and
+        falls back to auto-detect rather than raising.
         """
         # Coerce yaml-loaded values. Anything that isn't bool/dict/None
         # becomes "auto" with a warning — yaml is often user-edited, so we
@@ -150,6 +151,33 @@ class ApcliGroup:
             )
             config = None
         return cls._build(config, registry_injected=registry_injected, from_cli_config=False)
+
+    @classmethod
+    def try_from_yaml(
+        cls,
+        config: Any,
+        *,
+        registry_injected: bool,
+    ) -> tuple[ApcliGroup, None] | tuple[None, str]:
+        """Non-panicking Tier 3 constructor. Returns ``(instance, None)`` on
+        success or ``(None, error_message)`` on validation failure.
+
+        Use this in programmatic contexts where raising/exiting is unwanted.
+        ``from_yaml()`` is the lenient shim that logs + falls back;
+        ``try_from_yaml()`` surfaces the error so callers can decide.
+        """
+        if config is not None and not isinstance(config, bool | dict):
+            return None, (
+                f"apcore.yaml 'apcli:' must be a bool, mapping, or null; "
+                f"got {type(config).__name__}"
+            )
+        if isinstance(config, dict):
+            raw_mode = config.get("mode")
+            if raw_mode is not None and (
+                not isinstance(raw_mode, str) or raw_mode not in _VALID_USER_MODES
+            ):
+                return None, f"Invalid apcli mode: '{raw_mode}'. Must be one of: all, none, include, exclude."
+        return cls._build(config, registry_injected=registry_injected, from_cli_config=False), None
 
     # ---- Internal builder --------------------------------------------------
 
