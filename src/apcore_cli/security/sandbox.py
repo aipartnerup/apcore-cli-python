@@ -20,21 +20,12 @@ class ModuleExecutionError(Exception):
     pass
 
 
-# Non-secret APCORE_* vars forwarded into the sandbox subprocess.
-# Excludes credential/token vars (APCORE_AUTH_*, APCORE_*_KEY, etc.) so that
-# untrusted module code cannot read the remote-registry bearer token.
-_SANDBOX_APCORE_ALLOWLIST = frozenset(
-    {
-        "APCORE_EXTENSIONS_ROOT",
-        "APCORE_LOG_LEVEL",
-        "APCORE_CLI_LOGGING_LEVEL",
-        "APCORE_CLI_GROUP_DEPTH",
-        "APCORE_CLI_STRATEGY",
-        "APCORE_CLI_APPROVAL_TIMEOUT",
-        "APCORE_CLI_APCLI",
-        "APCORE_CLI_AUTO_APPROVE",
-    }
-)
+# Env forwarding strategy (mirrors Rust spec §4.4 and apcore-cli/docs/features/security.md):
+# Allow: PATH, PYTHONPATH, LANG, LC_ALL + all APCORE_* vars.
+# Deny prefix: APCORE_AUTH_ — credentials must not cross the sandbox trust boundary.
+_SANDBOX_ALLOW_KEYS = ("PATH", "PYTHONPATH", "LANG", "LC_ALL")
+_SANDBOX_ALLOW_PREFIX = "APCORE_"
+_SANDBOX_DENY_PREFIX = "APCORE_AUTH_"
 
 
 class Sandbox:
@@ -64,14 +55,14 @@ class Sandbox:
 
     def _sandboxed_execute(self, module_id: str, input_data: dict) -> Any:
         env: dict[str, str] = {}
-        for key in ("PATH", "PYTHONPATH", "LANG", "LC_ALL"):
+        for key in _SANDBOX_ALLOW_KEYS:
             if key in os.environ:
                 env[key] = os.environ[key]
-        # Forward only explicitly-allowlisted APCORE_* vars — excludes secrets
-        # such as APCORE_AUTH_API_KEY that must not reach untrusted module code.
-        for key in _SANDBOX_APCORE_ALLOWLIST:
-            if key in os.environ:
-                env[key] = os.environ[key]
+        # Forward all APCORE_* vars except the APCORE_AUTH_* deny prefix.
+        # Using prefix-allow + deny avoids silently missing newly-added APCORE_* vars.
+        for key, val in os.environ.items():
+            if key.startswith(_SANDBOX_ALLOW_PREFIX) and not key.startswith(_SANDBOX_DENY_PREFIX):
+                env[key] = val
 
         # Inject extensions root as an absolute path so the runner locates
         # modules correctly even when cwd is changed to the sandbox tempdir.
