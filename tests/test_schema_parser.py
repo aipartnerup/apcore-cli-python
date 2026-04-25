@@ -116,19 +116,19 @@ class TestBooleanAndEnum:
 
     def test_boolean_flag_pair(self):
         schema = {
-            "properties": {"verbose": {"type": "boolean"}},
+            "properties": {"enable_debug": {"type": "boolean"}},
             "required": [],
         }
         options = schema_to_click_options(schema)
         opt = options[0]
         assert opt.is_flag is True
         all_opts = opt.opts + getattr(opt, "secondary_opts", [])
-        assert "--verbose" in all_opts
-        assert "--no-verbose" in all_opts
+        assert "--enable-debug" in all_opts
+        assert "--no-enable-debug" in all_opts
 
     def test_boolean_default_true(self):
         schema = {
-            "properties": {"verbose": {"type": "boolean", "default": True}},
+            "properties": {"enable_debug": {"type": "boolean", "default": True}},
             "required": [],
         }
         options = schema_to_click_options(schema)
@@ -137,7 +137,7 @@ class TestBooleanAndEnum:
     def test_enum_choice(self):
         schema = {
             "properties": {
-                "format": {"type": "string", "enum": ["json", "csv"]},
+                "output_format": {"type": "string", "enum": ["json", "csv"]},
             },
             "required": [],
         }
@@ -237,3 +237,28 @@ class TestHelpAndCollisions:
         with pytest.raises(SystemExit) as exc_info:
             schema_to_click_options(schema)
         assert exc_info.value.code == 48
+
+
+class TestReservedPropertyNames:
+    """D10-008: schema_parser must reject reserved property names."""
+
+    def test_schema_parser_rejects_format_property(self):
+        """Property 'format' must raise because it collides with --format flag."""
+        schema = {"properties": {"format": {"type": "string", "description": "Output format"}}}
+        with pytest.raises((ValueError, Exception)) as exc_info:
+            schema_to_click_options(schema)
+        assert "format" in str(exc_info.value).lower() or "reserved" in str(exc_info.value).lower()
+
+    def test_schema_parser_rejects_input_property(self):
+        """Property 'input' must raise (conflicts with --input flag)."""
+        schema = {"properties": {"input": {"type": "string"}}}
+        with pytest.raises((ValueError, Exception)):
+            schema_to_click_options(schema)
+
+    def test_reserved_names_constant_exists(self):
+        """RESERVED_PROPERTY_NAMES frozenset must exist and contain 'format' and 'input'."""
+        from apcore_cli import schema_parser as _schema_parser
+
+        assert hasattr(_schema_parser, "RESERVED_PROPERTY_NAMES"), "RESERVED_PROPERTY_NAMES must be defined"
+        assert "format" in _schema_parser.RESERVED_PROPERTY_NAMES
+        assert "input" in _schema_parser.RESERVED_PROPERTY_NAMES

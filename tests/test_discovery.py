@@ -377,3 +377,65 @@ class TestExposureListFilter:
         result = CliRunner().invoke(cli, ["list", "--flat", "--format", "table", "--exposure", "all"])
         assert result.exit_code == 0
         assert "Exposure" in result.output
+
+
+class TestValidateErrBranchAuditsExecution:
+    def test_validate_err_branch_audits_execution(self):
+        """D11-009: Validate command Err branch must call audit log_execution."""
+        import apcore_cli.cli as cli_module
+        from apcore_cli.discovery import register_validate_command
+
+        mock_audit = MagicMock()
+        original_audit = cli_module._audit_logger
+        cli_module._audit_logger = mock_audit
+        try:
+
+            @click.group()
+            def apcli():
+                pass
+
+            registry = MagicMock()
+            module_def = MagicMock()
+            module_def.module_id = "test.mod"
+            module_def.description = "A test"
+            module_def.input_schema = None
+            module_def.annotations = None
+            registry.get_definition.return_value = module_def
+            executor = MagicMock()
+            executor.validate.side_effect = RuntimeError("validation failed")
+            register_validate_command(apcli, registry, executor)
+            runner = CliRunner()
+            runner.invoke(apcli, ["validate", "test.mod"])
+            assert mock_audit.log_execution.called, "audit log_execution must be called in validate Err branch"
+        finally:
+            cli_module._audit_logger = original_audit
+
+
+class TestApcliExecAppliesSandboxFlag:
+    def test_apcli_exec_applies_sandbox_flag(self):
+        """D11-005: apcli exec with --sandbox flag must use sandbox execution path."""
+        from unittest.mock import patch
+
+        from apcore_cli.discovery import register_exec_command
+        from apcore_cli.security.sandbox import Sandbox
+
+        @click.group()
+        def apcli():
+            pass
+
+        registry = MagicMock()
+        module_def = MagicMock()
+        module_def.module_id = "test.mod"
+        module_def.description = "A test"
+        module_def.input_schema = None
+        module_def.annotations = None
+        registry.get_definition.return_value = module_def
+        executor = MagicMock()
+        executor.call.return_value = {"ok": True}
+        register_exec_command(apcli, registry, executor)
+        runner = CliRunner()
+        with patch.object(Sandbox, "execute", return_value={"ok": True}):
+            result = runner.invoke(apcli, ["exec", "test.mod", "--sandbox"])
+        assert (
+            result.exit_code != 2
+        ), f"--sandbox flag must be accepted by apcli exec (exit_code={result.exit_code}, output={result.output})"

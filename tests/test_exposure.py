@@ -94,6 +94,16 @@ class TestExposureFilter:
         f = ExposureFilter()
         assert f.is_exposed("anything") is True
 
+    def test_unknown_mode_fails_closed(self):
+        """D10-001: ExposureFilter with unknown mode must return False (fail-closed)."""
+        f = ExposureFilter("whitelist")
+        assert f.is_exposed("any_module_id") is False, "Unknown mode must fail-closed (return False), not fail-open"
+
+    def test_another_unknown_mode_fails_closed(self):
+        """D10-001: Any unrecognised mode string must fail-closed."""
+        f = ExposureFilter("INCLUDE")  # uppercase — not a valid mode
+        assert f.is_exposed("any_module_id") is False
+
 
 # --- Task 3: from_config tests ---
 

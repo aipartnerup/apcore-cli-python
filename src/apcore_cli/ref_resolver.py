@@ -3,10 +3,23 @@
 from __future__ import annotations
 
 import copy
-import sys
 from typing import Any
 
-import click
+
+class RefResolverError(Exception):
+    """Base class for $ref resolution errors."""
+
+
+class CircularRefError(RefResolverError):
+    """Raised when a circular $ref is detected."""
+
+
+class UnresolvableRefError(RefResolverError):
+    """Raised when a $ref target cannot be found."""
+
+
+class MaxDepthExceededError(RefResolverError):
+    """Raised when $ref resolution depth exceeds the configured maximum."""
 
 
 def resolve_refs(schema: dict, max_depth: int = 32, module_id: str = "") -> dict:
@@ -41,29 +54,19 @@ def _resolve_node(
         ref_path = node["$ref"]
 
         if depth >= max_depth:
-            click.echo(
-                f"Error: $ref resolution depth exceeded maximum of {max_depth} for module '{module_id}'.",
-                err=True,
+            raise MaxDepthExceededError(
+                f"$ref resolution depth exceeded maximum of {max_depth} for module '{module_id}'."
             )
-            sys.exit(48)
 
         if ref_path in visited:
-            click.echo(
-                f"Error: Circular $ref detected in schema for module '{module_id}' at path '{ref_path}'.",
-                err=True,
-            )
-            sys.exit(48)
+            raise CircularRefError(f"Circular $ref detected in schema for module '{module_id}' at path '{ref_path}'.")
 
         # Parse ref target: extract key from "#/$defs/Address" → "Address"
         parts = ref_path.split("/")
         key = parts[-1]
 
         if key not in defs:
-            click.echo(
-                f"Error: Unresolvable $ref '{ref_path}' in schema for module '{module_id}'.",
-                err=True,
-            )
-            sys.exit(45)
+            raise UnresolvableRefError(f"Unresolvable $ref '{ref_path}' in schema for module '{module_id}'.")
 
         visited = visited | {ref_path}
         return _resolve_node(defs[key], defs, visited, depth + 1, max_depth, module_id)

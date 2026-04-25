@@ -13,6 +13,26 @@ logger = logging.getLogger("apcore_cli.schema_parser")
 # Sentinel for boolean flag marker
 _BOOLEAN_FLAG = object()
 
+# Property names that collide with built-in CLI options — schema_to_click_options
+# rejects these early so the error surfaces at schema-parse time, not at invocation.
+RESERVED_PROPERTY_NAMES: frozenset[str] = frozenset(
+    {
+        "format",
+        "input",
+        "yes",
+        "large_input",
+        "fields",
+        "sandbox",
+        "verbose",
+        "dry_run",
+        "trace",
+        "stream",
+        "strategy",
+        "approval_timeout",
+        "approval_token",
+    }
+)
+
 
 def _map_type(prop_name: str, prop_schema: dict) -> Any:
     """Map JSON Schema type to Click parameter type."""
@@ -78,6 +98,12 @@ def schema_to_click_options(schema: dict, max_help_length: int = 1000) -> list[c
             )
 
     for prop_name, prop_schema in properties.items():
+        if prop_name in RESERVED_PROPERTY_NAMES:
+            raise ValueError(
+                f"Schema property '{prop_name}' is reserved and conflicts with a built-in CLI option. "
+                "Rename the property."
+            )
+
         flag_name = "--" + prop_name.replace("_", "-")
 
         # Collision detection

@@ -53,6 +53,8 @@ class TestResolveRefs:
         assert "city" in addr["properties"]
 
     def test_resolve_circular_ref(self):
+        from apcore_cli.ref_resolver import CircularRefError
+
         schema = {
             "properties": {
                 "node": {"$ref": "#/$defs/A"},
@@ -62,11 +64,12 @@ class TestResolveRefs:
                 "B": {"properties": {"next": {"$ref": "#/$defs/A"}}},
             },
         }
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(CircularRefError):
             resolve_refs(schema, module_id="test")
-        assert exc_info.value.code == 48
 
     def test_resolve_depth_exceeded(self):
+        from apcore_cli.ref_resolver import MaxDepthExceededError
+
         # Build a chain of 33 refs
         defs = {}
         for i in range(33):
@@ -77,20 +80,20 @@ class TestResolveRefs:
             "properties": {"field": {"$ref": "#/$defs/R0"}},
             "$defs": defs,
         }
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(MaxDepthExceededError):
             resolve_refs(schema, max_depth=32, module_id="test")
-        assert exc_info.value.code == 48
 
     def test_resolve_unresolvable_ref(self):
+        from apcore_cli.ref_resolver import UnresolvableRefError
+
         schema = {
             "properties": {
                 "field": {"$ref": "#/$defs/Missing"},
             },
             "$defs": {},
         }
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(UnresolvableRefError):
             resolve_refs(schema, module_id="test")
-        assert exc_info.value.code == 45
 
     def test_resolve_no_refs(self):
         schema = {
@@ -225,3 +228,60 @@ class TestComposition:
         result = resolve_refs(schema, module_id="test")
         assert "flag" in result["properties"], "sibling property must not be dropped by oneOf"
         assert "x" in result["properties"], "oneOf-resolved property must be present"
+
+
+class TestRefResolverExceptions:
+    """D10-006: resolve_refs must raise typed exceptions instead of sys.exit."""
+
+    def test_resolve_refs_raises_circular_ref(self):
+        """resolve_refs must raise CircularRefError (not sys.exit) for circular schemas."""
+        from apcore_cli.ref_resolver import CircularRefError
+        from apcore_cli.ref_resolver import resolve_refs as _resolve_refs
+
+        schema = {
+            "properties": {"node": {"$ref": "#/$defs/A"}},
+            "$defs": {
+                "A": {"properties": {"next": {"$ref": "#/$defs/B"}}},
+                "B": {"properties": {"next": {"$ref": "#/$defs/A"}}},
+            },
+        }
+        with pytest.raises(CircularRefError):
+            _resolve_refs(schema, module_id="test")
+
+    def test_resolve_refs_raises_unresolvable_ref(self):
+        """resolve_refs must raise UnresolvableRefError for missing $ref targets."""
+        from apcore_cli.ref_resolver import UnresolvableRefError
+        from apcore_cli.ref_resolver import resolve_refs as _resolve_refs
+
+        schema = {
+            "properties": {"field": {"$ref": "#/$defs/Missing"}},
+            "$defs": {},
+        }
+        with pytest.raises(UnresolvableRefError):
+            _resolve_refs(schema, module_id="test")
+
+    def test_resolve_refs_raises_max_depth(self):
+        """resolve_refs must raise MaxDepthExceededError when depth limit is hit."""
+        from apcore_cli.ref_resolver import MaxDepthExceededError
+        from apcore_cli.ref_resolver import resolve_refs as _resolve_refs
+
+        defs = {}
+        for i in range(33):
+            next_key = f"R{i + 1}" if i < 32 else "R32"
+            defs[f"R{i}"] = {"$ref": f"#/$defs/{next_key}"}
+        defs["R32"] = {"type": "string"}
+        schema = {
+            "properties": {"field": {"$ref": "#/$defs/R0"}},
+            "$defs": defs,
+        }
+        with pytest.raises(MaxDepthExceededError):
+            _resolve_refs(schema, max_depth=32, module_id="test")
+
+    def test_ref_resolver_error_classes_exist(self):
+        """RefResolverError hierarchy must exist in ref_resolver module."""
+        from apcore_cli import ref_resolver as _ref_resolver
+
+        assert hasattr(_ref_resolver, "RefResolverError")
+        assert hasattr(_ref_resolver, "CircularRefError")
+        assert hasattr(_ref_resolver, "UnresolvableRefError")
+        assert hasattr(_ref_resolver, "MaxDepthExceededError")

@@ -220,3 +220,31 @@ class TestConfigExpose:
         assert resolver.resolve("expose.mode") == "all"
         assert resolver.resolve("expose.include") == []
         assert resolver.resolve("expose.exclude") == []
+
+
+class TestNoUnusedNamespaceDefaults:
+    """D9-007: Orphan config keys removed from apcore-cli namespace defaults."""
+
+    def test_no_unused_namespace_defaults(self):
+        from apcore.config import _GLOBAL_NS_REGISTRY
+
+        import apcore_cli  # noqa: F401
+
+        reg = _GLOBAL_NS_REGISTRY.get("apcore-cli")
+        assert reg is not None, "apcore-cli namespace should be registered"
+        defaults = reg.defaults or {}
+        orphan_keys = {"stdin_buffer_limit", "auto_approve", "logging_level", "strategy"}
+        for key in orphan_keys:
+            assert key not in defaults, f"Orphan key '{key}' should not be in apcore-cli namespace defaults"
+
+    def test_consumed_defaults_still_present(self):
+        from apcore.config import _GLOBAL_NS_REGISTRY
+
+        import apcore_cli  # noqa: F401
+
+        reg = _GLOBAL_NS_REGISTRY.get("apcore-cli")
+        assert reg is not None
+        defaults = reg.defaults or {}
+        consumed_keys = {"help_text_max_length", "approval_timeout", "group_depth"}
+        for key in consumed_keys:
+            assert key in defaults, f"Consumed key '{key}' must stay in apcore-cli namespace defaults"

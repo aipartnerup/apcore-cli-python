@@ -131,6 +131,30 @@ class TestConfigEncryptor:
         result = enc.retrieve(v1_ref, "auth.api_key")
         assert result == "legacy_secret"
 
+    def test_config_encryptor_uses_passphrase_env_var(self):
+        """D10-004: Key derived with APCORE_CLI_CONFIG_PASSPHRASE must differ from hostname:user key."""
+        import os
+
+        enc = ConfigEncryptor()
+        salt = os.urandom(16)
+        key_without = enc._derive_key(salt)
+        with patch.dict(os.environ, {"APCORE_CLI_CONFIG_PASSPHRASE": "test_passphrase"}, clear=False):
+            key_with = enc._derive_key(salt)
+        assert (
+            key_without != key_with
+        ), "Key derived with APCORE_CLI_CONFIG_PASSPHRASE must differ from hostname:user key"
+
+    def test_config_encryptor_passphrase_roundtrip(self):
+        """D10-004: Encrypt+decrypt must work consistently when passphrase env var is set."""
+        import os
+
+        enc = ConfigEncryptor()
+        plaintext = "my_secret_value"
+        with patch.dict(os.environ, {"APCORE_CLI_CONFIG_PASSPHRASE": "my_passphrase"}, clear=False):
+            ciphertext = enc._aes_encrypt(plaintext)
+            decrypted = enc._aes_decrypt(ciphertext)
+        assert decrypted == plaintext
+
     def test_store_fallback_warning_names_obfuscation_not_encryption(self, caplog):
         """W7: wording correction — log must NOT promise strong 'encryption'."""
         import logging

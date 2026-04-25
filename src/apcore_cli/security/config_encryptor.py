@@ -88,9 +88,13 @@ class ConfigEncryptor:
 
     def _derive_key(self, salt: bytes) -> bytes:
         """Derive a 32-byte AES key using PBKDF2-HMAC-SHA256 with a provided salt."""
-        hostname = socket.gethostname()
-        username = os.getenv("USER", os.getenv("USERNAME", "unknown"))
-        material = f"{hostname}:{username}".encode()
+        passphrase = os.getenv("APCORE_CLI_CONFIG_PASSPHRASE")
+        if passphrase:
+            material = passphrase.encode()
+        else:
+            hostname = socket.gethostname()
+            username = os.getenv("USER", os.getenv("USERNAME", "unknown"))
+            material = f"{hostname}:{username}".encode()
         return hashlib.pbkdf2_hmac("sha256", material, salt, iterations=_PBKDF2_ITERATIONS)
 
     def _aes_encrypt(self, plaintext: str) -> bytes:

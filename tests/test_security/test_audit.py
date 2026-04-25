@@ -95,3 +95,38 @@ class TestAuditLogger:
             "duration_ms",
         }
         assert set(entry.keys()) == expected_keys
+
+    def test_cli_error_path_records_real_duration_ms(self):
+        """D11-006: Error-path audit call via CLI must pass duration_ms > 0 (not hardcoded 0)."""
+        import time
+        from unittest.mock import MagicMock
+
+        from click.testing import CliRunner
+
+        from apcore_cli.cli import build_module_command, set_audit_logger
+
+        mock_audit = MagicMock()
+        set_audit_logger(mock_audit)
+        module_def = MagicMock()
+        module_def.module_id = "test.module"
+        module_def.description = "A test module"
+        module_def.input_schema = {"properties": {}, "required": []}
+        module_def.annotations = None
+        module_def.tags = []
+        executor = MagicMock()
+
+        def slow_raise(*args, **kwargs):
+            time.sleep(0.01)
+            raise RuntimeError("simulated error")
+
+        executor.call.side_effect = slow_raise
+        cmd = build_module_command(module_def, executor)
+        runner = CliRunner()
+        runner.invoke(cmd, [])
+        set_audit_logger(None)
+
+        assert mock_audit.log_execution.called, "log_execution must be called on error"
+        call_args = mock_audit.log_execution.call_args
+        positional = call_args[0]
+        duration_ms = positional[4] if len(positional) >= 5 else call_args[1].get("duration_ms", 0)
+        assert duration_ms > 0, f"duration_ms must be > 0 on error path, got {duration_ms}"

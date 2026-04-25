@@ -121,3 +121,21 @@ class TestSandbox:
             mock_run.return_value = MagicMock(returncode=0, stdout=big_stdout, stderr="")
             with pytest.raises(ModuleExecutionError, match="exceeded"):
                 sandbox._sandboxed_execute("mod", {})
+
+    def test_sandbox_does_not_forward_pythonpath(self):
+        """D10-010: PYTHONPATH must not appear in the sandboxed subprocess environment."""
+        sandbox = Sandbox(enabled=True)
+        parent_env = {"PYTHONPATH": "/some/path", "PATH": "/usr/bin"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", parent_env, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            assert "PYTHONPATH" not in call_env, "PYTHONPATH must not be forwarded to the sandbox"
+
+    def test_sandbox_deny_keys_constant_exists(self):
+        """D11-007: _SANDBOX_DENY_KEYS constant must be defined and contain APCORE_AUTH_API_KEY."""
+        from apcore_cli.security import sandbox as sandbox_module
+
+        assert hasattr(sandbox_module, "_SANDBOX_DENY_KEYS"), "_SANDBOX_DENY_KEYS must be defined in sandbox.py"
+        assert "APCORE_AUTH_API_KEY" in sandbox_module._SANDBOX_DENY_KEYS

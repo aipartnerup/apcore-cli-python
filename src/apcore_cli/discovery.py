@@ -296,6 +296,12 @@ def register_exec_command(
         default=None,
         help="Seconds to wait for interactive approval.",
     )
+    @click.option(
+        "--sandbox",
+        is_flag=True,
+        default=False,
+        help="Run module in an isolated subprocess with restricted filesystem and env access.",
+    )
     def exec_cmd(
         module_id: str,
         output_format: str | None,
@@ -303,6 +309,7 @@ def register_exec_command(
         stdin_input: str | None,
         auto_approve: bool,
         approval_timeout: int | None,
+        sandbox: bool,
     ) -> None:
         """Execute a module by ID with JSON input."""
         validate_module_id(module_id)
@@ -329,11 +336,13 @@ def register_exec_command(
 
         import time
 
+        from apcore_cli.security.sandbox import Sandbox
+
         audit_start = time.monotonic()
         try:
             timeout = approval_timeout if approval_timeout is not None else 60
             check_approval(module_def, auto_approve=auto_approve, timeout=timeout)
-            result = executor.call(module_id, merged)
+            result = Sandbox(enabled=sandbox).execute(module_id, merged, executor)
             fmt = resolve_format(output_format)
             format_exec_result(result, fmt, fields)
             duration_ms = int((time.monotonic() - audit_start) * 1000)
@@ -383,6 +392,9 @@ def register_validate_command(apcli_group: click.Group, registry: Any, executor:
         except Exception as e:
             code = getattr(e, "code", None)
             exit_code = _ERROR_CODE_MAP.get(code, 1) if isinstance(code, str) else 1
+            _al = _cli_module._audit_logger
+            if _al is not None:
+                _al.log_execution(module_id, merged, "error", exit_code, 0)
             _emit_error_tty(e, exit_code)
             sys.exit(exit_code)
         sys.exit(0 if preflight.valid else _first_failed_exit_code(preflight))

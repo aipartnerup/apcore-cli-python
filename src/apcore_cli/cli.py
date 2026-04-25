@@ -17,7 +17,7 @@ from apcore_cli.approval import check_approval
 from apcore_cli.builtin_group import RESERVED_GROUP_NAMES as RESERVED_GROUP_NAMES  # noqa: PLC0414
 from apcore_cli.display_helpers import get_display as _get_display
 from apcore_cli.output import format_exec_result
-from apcore_cli.ref_resolver import resolve_refs
+from apcore_cli.ref_resolver import RefResolverError, resolve_refs
 from apcore_cli.schema_parser import reconvert_enum_values, schema_to_click_options
 from apcore_cli.security.sandbox import Sandbox
 
@@ -582,7 +582,7 @@ def build_module_command(
     if input_schema.get("properties"):
         try:
             resolved_schema = resolve_refs(input_schema, max_depth=32, module_id=module_id)
-        except SystemExit:
+        except (SystemExit, RefResolverError):
             raise
         except Exception as e:
             logger.warning("Failed to resolve $refs in schema for '%s', using raw schema: %s", module_id, e)
@@ -590,7 +590,11 @@ def build_module_command(
     else:
         resolved_schema = input_schema
 
-    schema_options = schema_to_click_options(resolved_schema, max_help_length=help_text_max_length)
+    try:
+        schema_options = schema_to_click_options(resolved_schema, max_help_length=help_text_max_length)
+    except ValueError as e:
+        click.echo(f"Error: Module '{module_id}' schema error: {e}", err=True)
+        sys.exit(2)
 
     def callback(**kwargs: Any) -> None:
         # Separate built-in options from schema-generated kwargs
@@ -608,6 +612,7 @@ def build_module_command(
         approval_token = kwargs.pop("approval_token", None)
 
         merged: dict[str, Any] = {}
+        audit_start = time.monotonic()
         try:
             # 1. Collect and merge input (STDIN + CLI flags)
             merged = collect_input(stdin_input, kwargs, large_input)
@@ -667,8 +672,7 @@ def build_module_command(
             # 4. Check approval gate
             check_approval(module_def, auto_approve, timeout=approval_timeout)
 
-            # 5. Execute with timing (optionally sandboxed)
-            audit_start = time.monotonic()
+            # 5. Execute (optionally sandboxed)
 
             # -- Streaming execution --
             if stream_flag:
@@ -815,7 +819,8 @@ def build_module_command(
 
             # Audit log (error)
             if _audit_logger is not None:
-                _audit_logger.log_execution(module_id, merged, "error", exit_code, 0)
+                duration_ms = int((time.monotonic() - audit_start) * 1000)
+                _audit_logger.log_execution(module_id, merged, "error", exit_code, duration_ms)
 
             if output_format == "json" or not sys.stderr.isatty():
                 _emit_error_json(e, exit_code)

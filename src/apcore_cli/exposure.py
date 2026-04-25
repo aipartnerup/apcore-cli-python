@@ -71,7 +71,7 @@ class ExposureFilter:
             return any(rx.match(module_id) for rx in self._compiled_include)
         if self._mode == "exclude":
             return not any(rx.match(module_id) for rx in self._compiled_exclude)
-        return True
+        return False
 
     def filter_modules(self, module_ids: list[str]) -> tuple[list[str], list[str]]:
         """Partition module_ids into (exposed, hidden) lists."""
