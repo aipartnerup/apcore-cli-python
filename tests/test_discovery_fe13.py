@@ -228,7 +228,7 @@ class TestApcliExecPolicyFlags:
         preflight.checks = []
         executor.validate.return_value = preflight
         cli = _build_apcli_with(register_exec_command, registry, executor)
-        result = CliRunner().invoke(
+        CliRunner().invoke(
             cli,
             ["exec", "foo.bar", "--dry-run", "--yes"],
         )
