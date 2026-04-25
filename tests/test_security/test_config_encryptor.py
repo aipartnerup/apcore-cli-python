@@ -32,10 +32,10 @@ class TestConfigEncryptor:
             result = enc.store("auth.api_key", "secret123")
         assert result == "keyring:auth.api_key"
 
-    def test_retrieve_enc_ref(self):
+    def test_retrieve_enc_v2_ref(self):
         enc = ConfigEncryptor()
         ct = enc._aes_encrypt("my_secret")
-        enc_ref = f"enc:{base64.b64encode(ct).decode()}"
+        enc_ref = f"enc:v2:{base64.b64encode(ct).decode()}"
         result = enc.retrieve(enc_ref, "auth.api_key")
         assert result == "my_secret"
 
@@ -74,6 +74,61 @@ class TestConfigEncryptor:
             ct_b64 = base64.b64encode(b"\x00" * 32).decode()
             with pytest.raises(ConfigDecryptionError, match="Failed to decrypt"):
                 enc.retrieve(f"enc:{ct_b64}", "auth.api_key")
+
+    # --- regression tests for A-D-001/002: enc:v2 + 600k PBKDF2 ---
+
+    def test_store_without_keyring_writes_v2_prefix(self):
+        """A-D-001: store() without keyring must emit enc:v2: not enc:."""
+        enc = ConfigEncryptor()
+        with patch.object(enc, "_keyring_available", return_value=False):
+            result = enc.store("auth.api_key", "secret123")
+        assert result.startswith("enc:v2:"), f"Expected enc:v2: prefix, got: {result[:20]}"
+
+    def test_pbkdf2_uses_600k_iterations(self):
+        """A-D-002: _derive_key must use 600,000 PBKDF2-HMAC-SHA256 iterations."""
+        import hashlib as _hashlib
+
+        with patch.object(_hashlib, "pbkdf2_hmac", wraps=_hashlib.pbkdf2_hmac) as mock_pbkdf2:
+            enc = ConfigEncryptor()
+            enc._aes_encrypt("test")
+            assert mock_pbkdf2.called
+            call_kwargs = mock_pbkdf2.call_args
+            iterations = call_kwargs[1].get("iterations") or call_kwargs[0][3]
+            assert iterations == 600_000, f"Expected 600_000 iterations, got {iterations}"
+
+    def test_v2_store_retrieve_roundtrip(self):
+        """A-D-001: enc:v2 store → retrieve roundtrip must work."""
+        enc = ConfigEncryptor()
+        with patch.object(enc, "_keyring_available", return_value=False):
+            stored = enc.store("auth.api_key", "round_trip_value_123")
+        assert stored.startswith("enc:v2:")
+        recovered = enc.retrieve(stored, "auth.api_key")
+        assert recovered == "round_trip_value_123"
+
+    def test_v1_enc_backward_compat_read(self):
+        """A-D-001: enc: (v1) values written by older SDK must still be readable."""
+        # Construct a v1-format enc: value using the old static-salt + 600k method
+        import base64 as _b64
+        import hashlib as _hl
+        import os as _os
+        import socket as _sock
+        from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+
+        hostname = _sock.gethostname()
+        username = _os.getenv("USER", _os.getenv("USERNAME", "unknown"))
+        material = f"{hostname}:{username}".encode()
+        static_salt = b"apcore-cli-config-v1"
+        key = _hl.pbkdf2_hmac("sha256", material, static_salt, iterations=600_000)
+        nonce = _os.urandom(12)
+        encryptor = Cipher(algorithms.AES(key), modes.GCM(nonce)).encryptor()
+        ct = encryptor.update(b"legacy_secret") + encryptor.finalize()
+        tag = encryptor.tag
+        raw = nonce + tag + ct
+        v1_ref = f"enc:{_b64.b64encode(raw).decode()}"
+
+        enc = ConfigEncryptor()
+        result = enc.retrieve(v1_ref, "auth.api_key")
+        assert result == "legacy_secret"
 
     def test_store_fallback_warning_names_obfuscation_not_encryption(self, caplog):
         """W7: wording correction — log must NOT promise strong 'encryption'."""
