@@ -139,3 +139,61 @@ class TestSandbox:
 
         assert hasattr(sandbox_module, "_SANDBOX_DENY_KEYS"), "_SANDBOX_DENY_KEYS must be defined in sandbox.py"
         assert "APCORE_AUTH_API_KEY" in sandbox_module._SANDBOX_DENY_KEYS
+
+    def test_sandbox_env_consults_deny_keys_set(self, monkeypatch):
+        """D11-002: env construction must consult _SANDBOX_DENY_KEYS as
+        defense-in-depth alongside the prefix filter. TS and Rust both apply
+        prefix + explicit-key checks; without consulting the deny set, a
+        future APCORE_* key that matches the allow prefix but is in the
+        explicit deny list would leak into the sandbox child env.
+
+        Reproduction: extend _SANDBOX_DENY_KEYS with a non-AUTH-prefixed key
+        that still matches the APCORE_ allow prefix; the sandbox must still
+        strip it.
+        """
+        from apcore_cli.security import sandbox as sandbox_module
+
+        leaky_key = "APCORE_TEST_LEAK"
+        # Extend the deny set so the test exercises the deny-keys check
+        # (the production guard is unchanged outside this monkeypatch).
+        monkeypatch.setattr(
+            sandbox_module,
+            "_SANDBOX_DENY_KEYS",
+            frozenset({"APCORE_AUTH_API_KEY", leaky_key}),
+        )
+
+        sandbox = Sandbox(enabled=True)
+        parent_env = {leaky_key: "must-not-leak", "APCORE_LOG_LEVEL": "DEBUG", "PATH": "/usr/bin"}
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", parent_env, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            # Sanity check: a non-denied APCORE_* key still forwards through.
+            assert "APCORE_LOG_LEVEL" in call_env
+            # Defense-in-depth: deny-set member must be stripped even though
+            # it matches the allow prefix and not the AUTH_ deny prefix.
+            assert leaky_key not in call_env, (
+                f"{leaky_key} is in _SANDBOX_DENY_KEYS but leaked into the sandbox env"
+            )
+
+    def test_sandbox_env_strips_every_deny_key_member(self):
+        """D11-002: for every key in the production _SANDBOX_DENY_KEYS, the
+        sandbox env build must exclude that key — covers all current and
+        future entries without enumerating them in the test."""
+        from apcore_cli.security import sandbox as sandbox_module
+
+        deny_keys = list(sandbox_module._SANDBOX_DENY_KEYS)
+        assert deny_keys, "_SANDBOX_DENY_KEYS must not be empty"
+
+        sandbox = Sandbox(enabled=True)
+        parent_env = {k: "secret" for k in deny_keys}
+        parent_env["PATH"] = "/usr/bin"
+
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
+            with patch.dict("os.environ", parent_env, clear=True):
+                sandbox._sandboxed_execute("mod", {})
+            call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
+            for key in deny_keys:
+                assert key not in call_env, f"{key} (deny set member) leaked into sandbox env"

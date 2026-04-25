@@ -80,10 +80,17 @@ class Sandbox:
         for key in _SANDBOX_ALLOW_KEYS:
             if key in os.environ:
                 env[key] = os.environ[key]
-        # Forward all APCORE_* vars except the APCORE_AUTH_* deny prefix.
-        # Using prefix-allow + deny avoids silently missing newly-added APCORE_* vars.
+        # Forward all APCORE_* vars except the APCORE_AUTH_* deny prefix and
+        # any explicit deny-listed key (D11-002 — defense-in-depth parity with
+        # the TS and Rust sandboxes, which both apply prefix + explicit-key
+        # filtering). The explicit deny set covers entries that match the
+        # allow prefix but should never cross the sandbox trust boundary.
         for key, val in os.environ.items():
-            if key.startswith(_SANDBOX_ALLOW_PREFIX) and not key.startswith(_SANDBOX_DENY_PREFIX):
+            if (
+                key.startswith(_SANDBOX_ALLOW_PREFIX)
+                and not key.startswith(_SANDBOX_DENY_PREFIX)
+                and key not in _SANDBOX_DENY_KEYS
+            ):
                 env[key] = val
 
         # Inject extensions root as an absolute path so the runner locates
