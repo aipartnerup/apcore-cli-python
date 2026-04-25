@@ -14,20 +14,27 @@ logger = logging.getLogger("apcore_cli.approval")
 
 
 class ApprovalTimeoutError(Exception):
-    """Raised when the approval prompt times out."""
+    """Raised when the approval prompt times out.
 
-    pass
+    Carries ``code='APPROVAL_TIMEOUT'`` so the discovery.py exec_cmd
+    ``except Exception`` handler maps it to exit code 46 via _ERROR_CODE_MAP
+    while still flushing the audit log (D11-001).
+    """
+
+    code = "APPROVAL_TIMEOUT"
 
 
 class ApprovalDeniedError(Exception):
     """Raised when an approval request is denied (rejected or pending).
 
-    The CLI entry points surface denial as ``sys.exit(46)``; this exception
-    exists for SDK callers of :class:`CliApprovalHandler` and is listed in
-    the :mod:`apcore_cli` public API per the v0.6.0 error-class surface.
+    Carries ``code='APPROVAL_DENIED'`` so the discovery.py exec_cmd
+    ``except Exception`` handler maps it to exit code 46 via _ERROR_CODE_MAP
+    while still flushing the audit log (D11-001). Previously the legacy
+    ``check_approval`` wrapper called ``sys.exit(46)`` directly — SystemExit
+    is a BaseException and bypassed the audit-flush handler.
     """
 
-    pass
+    code = "APPROVAL_DENIED"
 
 
 def _get_annotation(annotations: Any, key: str, default: Any = None) -> Any:
@@ -120,7 +127,13 @@ def check_approval(module_def: Any, auto_approve: bool, timeout: int = 60) -> No
     """Check if module requires approval and handle accordingly.
 
     Returns None if approved (or approval not required).
-    Calls sys.exit(46) if denied/timed out/pending.
+    Raises :class:`ApprovalDeniedError` on denial / non-TTY / user reject,
+    or :class:`ApprovalTimeoutError` on prompt timeout. Both errors carry a
+    ``code`` attribute that maps to exit code 46 via the CLI ``_ERROR_CODE_MAP``;
+    the discovery.py exec_cmd ``except Exception`` handler is responsible for
+    flushing the audit log and translating the error to ``sys.exit(46)``
+    (D11-001 — previously this function called ``sys.exit`` directly, which
+    raises BaseException and bypassed the audit-flush handler).
 
     Args:
         module_def: Module descriptor with annotations.
@@ -152,13 +165,11 @@ def check_approval(module_def: Any, auto_approve: bool, timeout: int = 60) -> No
 
     # Non-TTY check
     if not sys.stdin.isatty():
-        click.echo(
-            f"Error: Module '{module_id}' requires approval but no interactive "
+        raise ApprovalDeniedError(
+            f"Module '{module_id}' requires approval but no interactive "
             "terminal is available. Use --yes or set APCORE_CLI_AUTO_APPROVE=1 "
-            "to bypass.",
-            err=True,
+            "to bypass."
         )
-        sys.exit(46)
 
     # TTY prompt
     _prompt_with_timeout(module_def, timeout=timeout)
@@ -184,14 +195,14 @@ def _prompt_with_timeout(module_def: Any, timeout: int = 60) -> None:
     try:
         approved = _tty_prompt(module_id, timeout)
     except ApprovalTimeoutError:
-        click.echo(f"Error: Approval prompt timed out after {timeout} seconds.", err=True)
-        sys.exit(46)
+        raise ApprovalTimeoutError(
+            f"Approval prompt timed out after {timeout} seconds."
+        ) from None
 
     if approved:
         logger.info("User approved execution of module '%s'.", module_id)
     else:
-        click.echo("Error: Approval denied.", err=True)
-        sys.exit(46)
+        raise ApprovalDeniedError("Approval denied.")
 
 
 def _tty_prompt(module_id: str, timeout: int) -> bool:

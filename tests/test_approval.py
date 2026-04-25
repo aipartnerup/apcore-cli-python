@@ -61,9 +61,8 @@ class TestCheckApprovalBypass:
         monkeypatch.setenv("APCORE_CLI_AUTO_APPROVE", "true")
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         m = _make_module(requires_approval=True)
-        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"), pytest.raises(SystemExit) as exc_info:
+        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"), pytest.raises(ApprovalDeniedError):
             check_approval(m, auto_approve=False)
-        assert exc_info.value.code == 46
         assert "expected '1'" in caplog.text
 
     def test_yes_flag_priority_over_env(self, monkeypatch, caplog):
@@ -78,12 +77,16 @@ class TestNonTTYRejection:
     """Task 2: Non-TTY rejection."""
 
     def test_non_tty_no_bypass_exits_46(self, monkeypatch):
+        """D11-001: non-TTY denial now raises ApprovalDeniedError (carries
+        ``code='APPROVAL_DENIED'`` which maps to exit 46 via _ERROR_CODE_MAP).
+        Previously this was a direct ``sys.exit(46)`` that bypassed audit-flush.
+        """
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
         m = _make_module(requires_approval=True)
-        with pytest.raises(SystemExit) as exc_info:
+        with pytest.raises(ApprovalDeniedError) as exc_info:
             check_approval(m, auto_approve=False)
-        assert exc_info.value.code == 46
+        assert exc_info.value.code == "APPROVAL_DENIED"
 
     def test_non_tty_with_yes_flag_proceeds(self, monkeypatch):
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
@@ -106,14 +109,19 @@ class TestTTYPrompt:
         assert "approved" in caplog.text
 
     def test_tty_user_denies(self, monkeypatch):
+        """D11-001: TTY rejection raises ApprovalDeniedError (exit 46 via map)."""
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
         m = _make_module(requires_approval=True)
-        with patch("apcore_cli.approval.click.confirm", return_value=False), pytest.raises(SystemExit) as exc_info:
+        with (
+            patch("apcore_cli.approval.click.confirm", return_value=False),
+            pytest.raises(ApprovalDeniedError) as exc_info,
+        ):
             check_approval(m, auto_approve=False)
-        assert exc_info.value.code == 46
+        assert exc_info.value.code == "APPROVAL_DENIED"
 
     def test_tty_timeout(self, monkeypatch):
+        """D11-001: TTY timeout raises ApprovalTimeoutError (exit 46 via map)."""
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
         m = _make_module(requires_approval=True)
@@ -122,10 +130,10 @@ class TestTTYPrompt:
                 "apcore_cli.approval.click.confirm",
                 side_effect=ApprovalTimeoutError(),
             ),
-            pytest.raises(SystemExit) as exc_info,
+            pytest.raises(ApprovalTimeoutError) as exc_info,
         ):
             check_approval(m, auto_approve=False)
-        assert exc_info.value.code == 46
+        assert exc_info.value.code == "APPROVAL_TIMEOUT"
 
     def test_custom_approval_message(self, monkeypatch, capsys):
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
@@ -169,3 +177,87 @@ class TestApprovalDeniedError:
         from apcore_cli import ApprovalDeniedError as ReExported
 
         assert ReExported is ApprovalDeniedError
+
+
+class TestCheckApprovalRaisesTypedErrors:
+    """D11-001: check_approval must raise typed exceptions (not sys.exit) so
+    discovery.py exec_cmd's ``except Exception`` handler can flush the audit
+    log before the process exits 46.
+
+    SystemExit is a BaseException, not an Exception, so it bypasses the
+    audit-flush handler — that is the bug this regression covers.
+    """
+
+    def test_non_tty_raises_approval_denied_error_not_systemexit(self, monkeypatch):
+        """Non-TTY denial path: raise ApprovalDeniedError, never sys.exit."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
+        m = _make_module(requires_approval=True)
+        with pytest.raises(ApprovalDeniedError):
+            check_approval(m, auto_approve=False)
+
+    def test_non_tty_error_catchable_by_except_exception(self, monkeypatch):
+        """Defense-in-depth: the raised error must be catchable by the
+        ``except Exception`` handler in discovery.py exec_cmd.
+        SystemExit (BaseException) would slip past this handler."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
+        m = _make_module(requires_approval=True)
+        caught = False
+        try:
+            check_approval(m, auto_approve=False)
+        except Exception:
+            caught = True
+        assert caught, "ApprovalDeniedError must be a normal Exception subclass"
+
+    def test_tty_user_denies_raises_approval_denied_error(self, monkeypatch):
+        """TTY denial path: raise ApprovalDeniedError, never sys.exit."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
+        m = _make_module(requires_approval=True)
+        with patch("apcore_cli.approval.click.confirm", return_value=False):
+            with pytest.raises(ApprovalDeniedError):
+                check_approval(m, auto_approve=False)
+
+    def test_tty_timeout_raises_approval_timeout_error(self, monkeypatch):
+        """TTY timeout path: raise ApprovalTimeoutError, never sys.exit."""
+        monkeypatch.setattr("sys.stdin.isatty", lambda: True)
+        monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
+        m = _make_module(requires_approval=True)
+        with patch(
+            "apcore_cli.approval.click.confirm",
+            side_effect=ApprovalTimeoutError(),
+        ):
+            with pytest.raises(ApprovalTimeoutError):
+                check_approval(m, auto_approve=False)
+
+    def test_env_var_invalid_raises_approval_denied_error(self, monkeypatch, caplog):
+        """Env var set to non-'1' should warn then take the non-TTY denial path
+        as a typed exception (not sys.exit)."""
+        monkeypatch.setenv("APCORE_CLI_AUTO_APPROVE", "true")
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        m = _make_module(requires_approval=True)
+        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"):
+            with pytest.raises(ApprovalDeniedError):
+                check_approval(m, auto_approve=False)
+        assert "expected '1'" in caplog.text
+
+    def test_typed_errors_carry_code_attribute_for_error_code_map(self, monkeypatch):
+        """The discovery.py exec_cmd handler maps ``e.code`` through
+        _ERROR_CODE_MAP. ApprovalDeniedError must carry ``code='APPROVAL_DENIED'``
+        and ApprovalTimeoutError ``code='APPROVAL_TIMEOUT'`` so they resolve to
+        exit code 46.
+        """
+        from apcore_cli.cli import _ERROR_CODE_MAP
+
+        monkeypatch.setattr("sys.stdin.isatty", lambda: False)
+        monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
+        m = _make_module(requires_approval=True)
+        try:
+            check_approval(m, auto_approve=False)
+        except ApprovalDeniedError as e:
+            code = getattr(e, "code", None)
+            assert code == "APPROVAL_DENIED"
+            assert _ERROR_CODE_MAP.get(code) == 46
+        else:
+            pytest.fail("expected ApprovalDeniedError")
