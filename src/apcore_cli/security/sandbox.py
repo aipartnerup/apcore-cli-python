@@ -20,6 +20,26 @@ class ModuleExecutionError(Exception):
     pass
 
 
+class ModuleNotFoundError(Exception):
+    """Raised when a module ID is not found in the registry (exit 44).
+
+    Equivalent to TypeScript's ``ModuleNotFoundError`` and Rust's
+    ``DiscoveryError::ModuleNotFound``.
+    """
+
+    pass
+
+
+class SchemaValidationError(Exception):
+    """Raised when JSON schema validation fails (exit 45).
+
+    Equivalent to TypeScript's ``SchemaValidationError`` and Rust's
+    ``RefResolverError::Unresolvable``.
+    """
+
+    pass
+
+
 # Env forwarding strategy (mirrors Rust spec §4.4 and apcore-cli/docs/features/security.md):
 # Allow: PATH, PYTHONPATH, LANG, LC_ALL + all APCORE_* vars.
 # Deny prefix: APCORE_AUTH_ — credentials must not cross the sandbox trust boundary.
