@@ -436,6 +436,6 @@ class TestApcliExecAppliesSandboxFlag:
         runner = CliRunner()
         with patch.object(Sandbox, "execute", return_value={"ok": True}):
             result = runner.invoke(apcli, ["exec", "test.mod", "--sandbox"])
-        assert (
-            result.exit_code != 2
-        ), f"--sandbox flag must be accepted by apcli exec (exit_code={result.exit_code}, output={result.output})"
+        assert result.exit_code != 2, (
+            f"--sandbox flag must be accepted by apcli exec (exit_code={result.exit_code}, output={result.output})"
+        )

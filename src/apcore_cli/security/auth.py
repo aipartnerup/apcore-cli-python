@@ -50,7 +50,7 @@ class AuthProvider:
                 result = self._get_encryptor().retrieve(result, "auth.api_key")
             except ConfigDecryptionError as exc:
                 raise AuthenticationError(
-                    "Failed to decrypt stored API key. " "Re-configure with 'apcore-cli config set auth.api_key'."
+                    "Failed to decrypt stored API key. Re-configure with 'apcore-cli config set auth.api_key'."
                 ) from exc
         return result
 

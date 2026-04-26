@@ -140,9 +140,9 @@ class TestConfigEncryptor:
         key_without = enc._derive_key(salt)
         with patch.dict(os.environ, {"APCORE_CLI_CONFIG_PASSPHRASE": "test_passphrase"}, clear=False):
             key_with = enc._derive_key(salt)
-        assert (
-            key_without != key_with
-        ), "Key derived with APCORE_CLI_CONFIG_PASSPHRASE must differ from hostname:user key"
+        assert key_without != key_with, (
+            "Key derived with APCORE_CLI_CONFIG_PASSPHRASE must differ from hostname:user key"
+        )
 
     def test_config_encryptor_passphrase_roundtrip(self):
         """D10-004: Encrypt+decrypt must work consistently when passphrase env var is set."""

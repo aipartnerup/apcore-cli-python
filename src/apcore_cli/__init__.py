@@ -26,7 +26,12 @@ except (ImportError, AttributeError):
     pass  # apcore < 0.15.0 or not installed
 
 # Public API re-exports
-from apcore_cli.approval import ApprovalDeniedError, ApprovalTimeoutError, CliApprovalHandler
+from apcore_cli.approval import (
+    ApprovalDeniedError,
+    ApprovalTimeoutError,
+    CliApprovalHandler,
+    check_approval,
+)
 from apcore_cli.builtin_group import (
     RESERVED_GROUP_NAMES,
     ApcliGroup,
@@ -41,7 +46,12 @@ from apcore_cli.schema_parser import schema_to_click_options
 from apcore_cli.security.audit import AuditLogger
 from apcore_cli.security.auth import AuthenticationError, AuthProvider
 from apcore_cli.security.config_encryptor import ConfigDecryptionError, ConfigEncryptor
-from apcore_cli.security.sandbox import ModuleExecutionError, ModuleNotFoundError, Sandbox, SchemaValidationError
+from apcore_cli.security.sandbox import (
+    CliModuleNotFoundError,
+    ModuleExecutionError,
+    Sandbox,
+    SchemaValidationError,
+)
 
 __all__ = [
     "__version__",
@@ -53,6 +63,7 @@ __all__ = [
     "RESERVED_GROUP_NAMES",
     # FE-11 approval
     "CliApprovalHandler",
+    "check_approval",
     # FE-12 exposure
     "ExposureFilter",
     # Schema / output / ref resolution
@@ -71,6 +82,6 @@ __all__ = [
     "AuthenticationError",
     "ConfigDecryptionError",
     "ModuleExecutionError",
-    "ModuleNotFoundError",
+    "CliModuleNotFoundError",
     "SchemaValidationError",
 ]

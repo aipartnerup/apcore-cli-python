@@ -8,6 +8,41 @@ import pytest
 from apcore_cli.approval import ApprovalDeniedError, ApprovalTimeoutError, check_approval
 
 
+def test_check_approval_is_exported_at_package_root():
+    """D1-002: check_approval must be importable from apcore_cli (cross-SDK parity).
+
+    Rust src/lib.rs:141 and TS src/index.ts:23 expose check_approval at the
+    crate / package root; Python previously only re-exported the handler and
+    error classes. Import path parity matters because cross-language docs
+    and examples reference apcore_cli.check_approval directly.
+    """
+    import apcore_cli
+
+    assert apcore_cli.check_approval is check_approval, (
+        "apcore_cli.check_approval must alias apcore_cli.approval.check_approval"
+    )
+    assert "check_approval" in apcore_cli.__all__, (
+        "check_approval must be in apcore_cli.__all__ for `from apcore_cli import *`"
+    )
+
+
+def test_module_not_found_error_does_not_shadow_builtin():
+    """D2-001: apcore_cli must NOT re-export a class named ModuleNotFoundError.
+
+    The Python interpreter raises builtins.ModuleNotFoundError as part of the
+    import system; a same-named class re-exported from apcore_cli would
+    clobber the builtin in any namespace doing `from apcore_cli import *`.
+    The class was renamed to CliModuleNotFoundError in v0.7.x.
+    """
+    import apcore_cli
+
+    assert hasattr(apcore_cli, "CliModuleNotFoundError"), "CliModuleNotFoundError must be re-exported from apcore_cli"
+    assert "CliModuleNotFoundError" in apcore_cli.__all__
+    assert "ModuleNotFoundError" not in apcore_cli.__all__, (
+        "ModuleNotFoundError must NOT be in __all__ — it would shadow the Python builtin"
+    )
+
+
 def _make_module(requires_approval=None, approval_message=None):
     m = MagicMock()
     m.module_id = "test.module"

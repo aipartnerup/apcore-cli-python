@@ -20,11 +20,19 @@ class ModuleExecutionError(Exception):
     pass
 
 
-class ModuleNotFoundError(Exception):
+class CliModuleNotFoundError(Exception):
     """Raised when a module ID is not found in the registry (exit 44).
 
+    Renamed from ``ModuleNotFoundError`` in v0.7.x (audit D2-001) to avoid
+    shadowing :class:`builtins.ModuleNotFoundError` — the Python interpreter
+    raises that builtin as part of the import-system contract, and a
+    re-exported same-named class made ``from apcore_cli import *`` clobber
+    the language-defined exception in the calling namespace.
+
     Equivalent to TypeScript's ``ModuleNotFoundError`` and Rust's
-    ``DiscoveryError::ModuleNotFound``.
+    ``DiscoveryError::ModuleNotFound``. Cross-language naming is asymmetric
+    by design: TS and Rust have no built-in collision and keep the short
+    name.
     """
 
     pass
