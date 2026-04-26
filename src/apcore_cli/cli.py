@@ -428,69 +428,16 @@ _ERROR_CODE_MAP = {
 }
 
 
-def _first_failed_exit_code(result: Any) -> int:
-    """Return the exit code for the first failed check in a PreflightResult."""
-    _check_to_exit = {
-        "module_id": 2,
-        "module_lookup": 44,
-        "call_chain": 1,
-        "acl": 77,
-        "schema": 45,
-        "approval": 46,
-        "module_preflight": 1,
-    }
-    for check in getattr(result, "checks", []):
-        if not check.passed:
-            return _check_to_exit.get(check.check, 1)
-    return 1
-
-
-def format_preflight_result(result: Any, fmt: str | None = None) -> None:
-    """Format and print a PreflightResult to stdout."""
-    from apcore_cli.output import resolve_format
-
-    resolved = resolve_format(fmt)
-    if resolved == "json" or not sys.stdout.isatty():
-        payload: dict[str, Any] = {
-            "valid": result.valid,
-            "requires_approval": result.requires_approval,
-            "checks": [],
-        }
-        for c in result.checks:
-            entry: dict[str, Any] = {"check": c.check, "passed": c.passed}
-            if c.error is not None:
-                entry["error"] = c.error
-            if c.warnings:
-                entry["warnings"] = c.warnings
-            payload["checks"].append(entry)
-        click.echo(json.dumps(payload, indent=2, default=str))
-    else:
-        # TTY table format
-        for c in result.checks:
-            has_warnings = bool(getattr(c, "warnings", []))
-            if c.passed and has_warnings:
-                sym = "\u26a0"  # ⚠ passed with warnings
-            elif c.passed:
-                sym = "\u2713"  # ✓ passed
-            elif c.passed is False:
-                sym = "\u2717"  # ✗ failed
-            else:
-                sym = "\u25cb"  # ○ skipped
-            status = f"  {sym} {c.check:<20}"
-            if c.error:
-                detail = json.dumps(c.error, default=str) if isinstance(c.error, dict) else str(c.error)
-                status += f" {detail}"
-            elif c.passed and not has_warnings:
-                status += " OK"
-            elif not c.passed:
-                status += " Skipped"
-            click.echo(status)
-            for w in getattr(c, "warnings", []):
-                click.echo(f"    Warning: {w}")
-        errors = sum(1 for c in result.checks if not c.passed)
-        warnings = sum(len(getattr(c, "warnings", [])) for c in result.checks)
-        tag = "PASS" if result.valid else "FAIL"
-        click.echo(f"\nResult: {tag} ({errors} error(s), {warnings} warning(s))")
+# D9-005: format_preflight_result and _first_failed_exit_code moved to
+# apcore_cli.validate to mirror apcore-cli-rust/src/validate.rs split.
+# Re-imported here for back-compat with legacy callers that did
+# ``from apcore_cli.cli import format_preflight_result``.
+from apcore_cli.validate import (  # noqa: E402
+    first_failed_exit_code as _first_failed_exit_code,
+)
+from apcore_cli.validate import (  # noqa: E402
+    format_preflight_result,
+)
 
 
 def _emit_error_json(e: Exception, exit_code: int) -> None:

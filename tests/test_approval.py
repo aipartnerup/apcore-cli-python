@@ -296,3 +296,19 @@ class TestCheckApprovalRaisesTypedErrors:
             assert _ERROR_CODE_MAP.get(code) == 46
         else:
             pytest.fail("expected ApprovalDeniedError")
+
+
+def test_validate_module_import_path():
+    """D9-005: format_preflight_result and first_failed_exit_code now live in
+    apcore_cli.validate (mirrors apcore-cli-rust/src/validate.rs split). The
+    legacy import path ``from apcore_cli.cli import format_preflight_result``
+    is preserved as a re-export shim for back-compat.
+    """
+    from apcore_cli.cli import _first_failed_exit_code as legacy_efc
+    from apcore_cli.cli import format_preflight_result as legacy_fp
+    from apcore_cli.validate import first_failed_exit_code as new_efc
+    from apcore_cli.validate import format_preflight_result as new_fp
+
+    # Same callable behind both names.
+    assert legacy_fp is new_fp
+    assert legacy_efc is new_efc
