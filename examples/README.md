@@ -10,11 +10,11 @@ pip install -e .
 export APCORE_EXTENSIONS_ROOT=examples/extensions
 
 # Run a module
-apcore-cli math.add --a 5 --b 10
+apcore-cli math add --a 5 --b 10
 # {"sum": 15}
 
 # List all modules
-apcore-cli list
+apcore-cli apcli list
 
 # Run all examples at once
 bash examples/run_examples.sh
@@ -24,14 +24,14 @@ bash examples/run_examples.sh
 
 | Module | Description | Example |
 |--------|-------------|---------|
-| `math.add` | Add two integers | `apcore-cli math.add --a 5 --b 10` |
-| `math.multiply` | Multiply two integers | `apcore-cli math.multiply --a 6 --b 7` |
-| `text.upper` | Uppercase a string | `apcore-cli text.upper --text hello` |
-| `text.reverse` | Reverse a string | `apcore-cli text.reverse --text abcdef` |
-| `text.wordcount` | Count words/chars/lines | `apcore-cli text.wordcount --text "hello world"` |
-| `sysutil.info` | System information | `apcore-cli sysutil.info` |
-| `sysutil.env` | Read an env variable | `apcore-cli sysutil.env --name HOME` |
-| `sysutil.disk` | Disk usage stats | `apcore-cli sysutil.disk --path /` |
+| `math.add` | Add two integers | `apcore-cli math add --a 5 --b 10` |
+| `math.multiply` | Multiply two integers | `apcore-cli math multiply --a 6 --b 7` |
+| `text.upper` | Uppercase a string | `apcore-cli text upper --text hello` |
+| `text.reverse` | Reverse a string | `apcore-cli text reverse --text abcdef` |
+| `text.wordcount` | Count words/chars/lines | `apcore-cli text wordcount --text "hello world"` |
+| `sysutil.info` | System information | `apcore-cli sysutil info` |
+| `sysutil.env` | Read an env variable | `apcore-cli sysutil env --name HOME` |
+| `sysutil.disk` | Disk usage stats | `apcore-cli sysutil disk --path /` |
 
 ## Writing Your Own Module
 
@@ -109,7 +109,7 @@ apcore-cli --extensions-dir ./extensions greet.hello --help
 ### How It Works
 
 ```
-apcore-cli greet.hello --name World
+apcore-cli greet hello --name World
     │
     ├── 1. Read module.json → register schema + flags
     ├── 2. Parse --name World → {"name": "World"}
@@ -125,13 +125,13 @@ The CLI only cares about the JSON stdin/stdout protocol. Your `run.sh` can call 
 
 ```bash
 # Pipe JSON input directly
-echo '{"a": 100, "b": 200}' | apcore-cli math.add --input -
+echo '{"a": 100, "b": 200}' | apcore-cli math add --input -
 # {"sum": 300}
 
 # CLI flags override STDIN values
-echo '{"a": 1, "b": 2}' | apcore-cli math.add --input - --a 999
+echo '{"a": 1, "b": 2}' | apcore-cli math add --input - --a 999
 # {"sum": 1001}
 
 # Chain with other tools
-apcore-cli sysutil.info | jq '.hostname'
+apcore-cli sysutil info | jq '.hostname'
 ```

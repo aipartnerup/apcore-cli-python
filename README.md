@@ -62,11 +62,11 @@ cd apcore-cli-python
 pip install -e ".[dev]"
 
 # Run a module
-apcore-cli --extensions-dir examples/extensions math.add --a 5 --b 10
+apcore-cli --extensions-dir examples/extensions math add --a 5 --b 10
 # {"sum": 15}
 
 # List all modules
-apcore-cli --extensions-dir examples/extensions list --format json
+apcore-cli --extensions-dir examples/extensions apcli list --format json
 
 # Run all examples
 bash examples/run_examples.sh
@@ -80,11 +80,11 @@ If you already have an apcore-based project with an extensions directory:
 
 ```bash
 # Execute a module
-apcore-cli --extensions-dir ./extensions math.add --a 42 --b 58
+apcore-cli --extensions-dir ./extensions math add --a 42 --b 58
 
 # Or set the env var once
 export APCORE_EXTENSIONS_ROOT=./extensions
-apcore-cli math.add --a 42 --b 58
+apcore-cli math add --a 42 --b 58
 ```
 
 All modules are auto-discovered. CLI flags are auto-generated from each module's JSON Schema.
@@ -176,7 +176,7 @@ cli()
 ### Fastest way (30 seconds)
 
 ```bash
-apcore-cli init module ops.deploy -d "Deploy to environment"
+apcore-cli apcli init module ops.deploy -d "Deploy to environment"
 # Edit the generated file, add your logic
 ```
 
@@ -224,23 +224,23 @@ No changes to your project. Just install and run:
 
 ```bash
 pip install apcore-cli
-apcore-cli --extensions-dir ./extensions list
-apcore-cli --extensions-dir ./extensions math.add --a 5 --b 10
+apcore-cli --extensions-dir ./extensions apcli list
+apcore-cli --extensions-dir ./extensions math add --a 5 --b 10
 ```
 
 ### STDIN piping (Unix pipes)
 
 ```bash
 # Pipe JSON input
-echo '{"a": 100, "b": 200}' | apcore-cli math.add --input -
+echo '{"a": 100, "b": 200}' | apcore-cli math add --input -
 # {"sum": 300}
 
 # CLI flags override STDIN values
-echo '{"a": 1, "b": 2}' | apcore-cli math.add --input - --a 999
+echo '{"a": 1, "b": 2}' | apcore-cli math add --input - --a 999
 # {"sum": 1001}
 
 # Chain with other tools
-apcore-cli sysutil.info | jq '.os, .hostname'
+apcore-cli sysutil info | jq '.os, .hostname'
 ```
 
 ## CLI Reference
@@ -262,45 +262,45 @@ apcore-cli [OPTIONS] COMMAND [ARGS]
 
 ### Built-in Commands
 
-apcore-cli ships with 14 built-in commands covering module invocation, runtime system management, workflow, and shell integration.
+apcore-cli ships with 14 built-in commands, all accessible under the `apcli` subgroup (e.g. `apcore-cli apcli list`). Root-level shims are kept for back-compat and will be removed in v0.8.
 
 **Module invocation**
 
 | Command | Description |
 |---------|-------------|
-| `exec <module_id>` | Execute a module (delegates to `Executor.call()`) |
-| `list` | List registered modules (supports `--tag`/`--search`/`--status`/`--annotation`/`--sort`/`--reverse`/`--deprecated`/`--deps` filters) |
-| `describe <module_id>` | Show full module metadata and schema |
+| `apcli exec <module_id>` | Execute a module (delegates to `Executor.call()`) |
+| `apcli list` | List registered modules (supports `--tag`/`--search`/`--status`/`--annotation`/`--sort`/`--reverse`/`--deprecated`/`--deps` filters) |
+| `apcli describe <module_id>` | Show full module metadata and schema |
 
 **System management** (FE-11, v0.6.0)
 
 | Command | Description |
 |---------|-------------|
-| `config get/set <key>` | Read or update runtime config values |
-| `health [<module_id>]` | Show module health status |
-| `usage [<module_id>]` | Show module usage statistics |
-| `enable <module_id>` | Enable a disabled module |
-| `disable <module_id>` | Disable a module at runtime |
-| `reload <module_id>` | Hot-reload a module from disk |
+| `apcli config get/set <key>` | Read or update runtime config values |
+| `apcli health [<module_id>]` | Show module health status |
+| `apcli usage [<module_id>]` | Show module usage statistics |
+| `apcli enable <module_id>` | Enable a disabled module |
+| `apcli disable <module_id>` | Disable a module at runtime |
+| `apcli reload <module_id>` | Hot-reload a module from disk |
 
 **Workflow**
 
 | Command | Description |
 |---------|-------------|
-| `validate <module_id>` | Preflight-check a module without executing it (`--dry-run`) |
-| `describe-pipeline` | Show execution pipeline steps for a strategy (FE-11) |
-| `init module <module_id>` | Scaffold a new module (`--style decorator\|convention\|binding`) |
+| `apcli validate <module_id>` | Preflight-check a module without executing it (`--dry-run`) |
+| `apcli describe-pipeline` | Show execution pipeline steps for a strategy (FE-11) |
+| `apcli init module <module_id>` | Scaffold a new module (`--style decorator\|convention\|binding`) |
 
 **Shell integration**
 
 | Command | Description |
 |---------|-------------|
-| `completion <shell>` | Generate shell completion script (bash/zsh/fish) |
-| `man <command>` | Generate roff man page for a command |
+| `apcli completion <shell>` | Generate shell completion script (bash/zsh/fish) |
+| `apcli man <command>` | Generate roff man page for a command |
 
 ### Module Execution Options
 
-When executing a module (e.g. `apcore-cli math.add`), these built-in options are available (hidden by default; pass `--help --verbose` to display them):
+When executing a module (e.g. `apcore-cli math add`), these built-in options are available (hidden by default; pass `--help --verbose` to display them):
 
 | Option | Description |
 |--------|-------------|
@@ -389,8 +389,8 @@ cli:
 - **Approval gate** -- TTY-aware HITL prompts for modules with `requires_approval: true`, with `--yes` bypass and 60s timeout
 - **Schema validation** -- inputs validated against JSON Schema before execution, with `$ref`/`allOf`/`anyOf`/`oneOf` resolution
 - **Security** -- API key auth (keyring + AES-256-GCM), append-only audit logging, subprocess sandboxing
-- **Shell completions** -- `apcore-cli completion bash|zsh|fish` generates completion scripts with dynamic module ID completion
-- **Man pages** -- `apcore-cli man <command>` generates per-command man pages; `--help --man` prints a full-program man page via `configure_man_help()`
+- **Shell completions** -- `apcore-cli apcli completion bash|zsh|fish` generates completion scripts with dynamic module ID completion
+- **Man pages** -- `apcore-cli apcli man <command>` generates per-command man pages; `--help --man` prints a full-program man page via `configure_man_help()`
 - **Documentation URL** -- `set_docs_url()` sets a base URL; per-command help shows `Docs: {url}/commands/{name}`, man page SEE ALSO links to the full docs site
 - **Audit logging** -- all executions logged to `~/.apcore-cli/audit.jsonl` with SHA-256 input hashing
 
@@ -443,14 +443,14 @@ The `examples/extensions/` directory contains 8 runnable modules:
 
 | Module | Description | Usage |
 |--------|-------------|-------|
-| `math.add` | Add two integers | `apcore-cli math.add --a 5 --b 10` |
-| `math.multiply` | Multiply two integers | `apcore-cli math.multiply --a 6 --b 7` |
-| `text.upper` | Uppercase a string | `apcore-cli text.upper --text hello` |
-| `text.reverse` | Reverse a string | `apcore-cli text.reverse --text abcdef` |
-| `text.wordcount` | Count words/chars/lines | `apcore-cli text.wordcount --text "hello world"` |
-| `sysutil.info` | OS, hostname, Python version | `apcore-cli sysutil.info` |
-| `sysutil.env` | Read environment variables | `apcore-cli sysutil.env --name HOME` |
-| `sysutil.disk` | Disk usage statistics | `apcore-cli sysutil.disk --path /` |
+| `math.add` | Add two integers | `apcore-cli math add --a 5 --b 10` |
+| `math.multiply` | Multiply two integers | `apcore-cli math multiply --a 6 --b 7` |
+| `text.upper` | Uppercase a string | `apcore-cli text upper --text hello` |
+| `text.reverse` | Reverse a string | `apcore-cli text reverse --text abcdef` |
+| `text.wordcount` | Count words/chars/lines | `apcore-cli text wordcount --text "hello world"` |
+| `sysutil.info` | OS, hostname, Python version | `apcore-cli sysutil info` |
+| `sysutil.env` | Read environment variables | `apcore-cli sysutil env --name HOME` |
+| `sysutil.disk` | Disk usage statistics | `apcore-cli sysutil disk --path /` |
 
 ### Running examples
 
@@ -459,26 +459,26 @@ The `examples/extensions/` directory contains 8 runnable modules:
 export APCORE_EXTENSIONS_ROOT=examples/extensions
 
 # Execute modules
-apcore-cli math.add --a 42 --b 58
-apcore-cli text.upper --text "hello apcore"
-apcore-cli sysutil.info
-apcore-cli sysutil.disk --path /
+apcore-cli math add --a 42 --b 58
+apcore-cli text upper --text "hello apcore"
+apcore-cli sysutil info
+apcore-cli sysutil disk --path /
 
 # Discovery
-apcore-cli list --format json
-apcore-cli list --tag math --format json
-apcore-cli describe math.add --format json
+apcore-cli apcli list --format json
+apcore-cli apcli list --tag math --format json
+apcore-cli apcli describe math.add --format json
 
 # STDIN piping
-echo '{"a": 100, "b": 200}' | apcore-cli math.add --input -
+echo '{"a": 100, "b": 200}' | apcore-cli math add --input -
 
 # Shell completion
-apcore-cli completion bash >> ~/.bashrc
-apcore-cli completion zsh >> ~/.zshrc
-apcore-cli completion fish > ~/.config/fish/completions/apcore-cli.fish
+apcore-cli apcli completion bash >> ~/.bashrc
+apcore-cli apcli completion zsh >> ~/.zshrc
+apcore-cli apcli completion fish > ~/.config/fish/completions/apcore-cli.fish
 
 # Man pages
-apcore-cli man list | man -l -
+apcore-cli apcli man list | man -l -
 
 # Run all examples at once
 bash examples/run_examples.sh
@@ -511,10 +511,10 @@ class GreetHello:
 Then run it:
 
 ```bash
-apcore-cli --extensions-dir ./extensions greet.hello --name World
+apcore-cli --extensions-dir ./extensions greet hello --name World
 # {"message": "Hello, World!"}
 
-apcore-cli --extensions-dir ./extensions greet.hello --name Alice --greeting Hi
+apcore-cli --extensions-dir ./extensions greet hello --name Alice --greeting Hi
 # {"message": "Hi, Alice!"}
 ```
 
