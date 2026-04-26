@@ -118,6 +118,24 @@ def schema_to_click_options(schema: dict, max_help_length: int = 1000) -> list[c
         flag_names[flag_name] = prop_name
 
         click_type = _map_type(prop_name, prop_schema)
+
+        # Cross-SDK parity (D11-005): Rust schema_parser.rs:272 also registers
+        # the auto-synthesized ``--no-<flag>`` form into the collision map for
+        # boolean properties, so a schema pairing a boolean ``force`` with a
+        # non-boolean ``no_force`` is rejected at parse time. Without this,
+        # the second property silently shadows the negation flag.
+        if click_type is _BOOLEAN_FLAG:
+            flag_base = prop_name.replace("_", "-")
+            no_flag = f"--no-{flag_base}"
+            if no_flag in flag_names:
+                click.echo(
+                    f"Error: Flag name collision: boolean property '{prop_name}' "
+                    f"auto-generates '{no_flag}' which is already used by property "
+                    f"'{flag_names[no_flag]}'.",
+                    err=True,
+                )
+                sys.exit(48)
+            flag_names[no_flag] = prop_name
         is_required = prop_name in required_list
         _help_base = _extract_help(prop_schema, max_length=max_help_length)
         # Append [required] to help text for user clarity; do NOT set required=True

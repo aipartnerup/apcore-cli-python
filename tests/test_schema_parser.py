@@ -262,3 +262,70 @@ class TestReservedPropertyNames:
         assert hasattr(_schema_parser, "RESERVED_PROPERTY_NAMES"), "RESERVED_PROPERTY_NAMES must be defined"
         assert "format" in _schema_parser.RESERVED_PROPERTY_NAMES
         assert "input" in _schema_parser.RESERVED_PROPERTY_NAMES
+
+
+class TestNoFlagCollision:
+    """D11-005: boolean properties auto-generate ``--no-<flag>`` and that
+    name must be tracked in the collision map so a sibling property that
+    normalizes to the same name is rejected at parse time. Cross-SDK
+    parity with apcore-cli-rust/src/schema_parser.rs:272.
+    """
+
+    def test_bool_then_no_form_collision_raises_exit_48(self):
+        """force: bool + no_force: str — the boolean processed first,
+        then the non-boolean's ``--no-force`` collides with the auto-form."""
+        from apcore_cli.schema_parser import schema_to_click_options
+
+        schema = {
+            "properties": {
+                "force": {"type": "boolean"},
+                "no_force": {"type": "string"},
+            }
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            schema_to_click_options(schema)
+        assert exc_info.value.code == 48
+
+    def test_no_form_then_bool_collision_raises_exit_48(self):
+        """no_force: str + force: bool — the non-boolean processed first,
+        then the boolean's auto-generated ``--no-force`` collides."""
+        from apcore_cli.schema_parser import schema_to_click_options
+
+        schema = {
+            "properties": {
+                "no_force": {"type": "string"},
+                "force": {"type": "boolean"},
+            }
+        }
+        with pytest.raises(SystemExit) as exc_info:
+            schema_to_click_options(schema)
+        assert exc_info.value.code == 48
+
+    def test_unrelated_no_prefixed_property_still_works(self):
+        """A property that happens to start with ``no_`` is fine when there
+        is no corresponding boolean — common case must keep working."""
+        from apcore_cli.schema_parser import schema_to_click_options
+
+        schema = {
+            "properties": {
+                "no_color": {"type": "boolean"},
+                "color": {"type": "string"},
+            }
+        }
+        # color and no_color share no auto-generated negation overlap (the
+        # boolean is no_color → --no-color / --no-no-color; the string
+        # color → --color). Should produce 2 options without exiting.
+        result = schema_to_click_options(schema)
+        assert len(result) == 2
+
+    def test_two_unrelated_booleans_no_collision(self):
+        from apcore_cli.schema_parser import schema_to_click_options
+
+        schema = {
+            "properties": {
+                "force": {"type": "boolean"},
+                "verbose_logs": {"type": "boolean"},
+            }
+        }
+        result = schema_to_click_options(schema)
+        assert len(result) == 2

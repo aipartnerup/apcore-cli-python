@@ -50,12 +50,27 @@ class ExposureFilter:
     - ``exclude``: all modules are exposed except those matching any exclude pattern.
     """
 
+    _VALID_MODES = ("all", "include", "exclude", "none")
+
     def __init__(
         self,
         mode: str = "all",
         include: list[str] | None = None,
         exclude: list[str] | None = None,
     ) -> None:
+        # Cross-SDK parity with apcore-cli-rust/src/exposure.rs:70 (D11-008):
+        # unknown mode values clamp to "none" with a warning so consumers
+        # that introspect ``filter.mode`` see a consistent value across
+        # the three SDKs. Runtime exposure decision is unchanged
+        # (is_exposed already fail-closed on unknown modes via its
+        # default-False branch); this clamp aligns the persisted state.
+        if mode not in self._VALID_MODES:
+            logger.warning(
+                "Unknown ExposureFilter mode '%s' — defaulting to 'none'. Valid modes: %s.",
+                mode,
+                ", ".join(self._VALID_MODES),
+            )
+            mode = "none"
         self._mode = mode
         self._include_patterns = list(dict.fromkeys(include or []))
         self._exclude_patterns = list(dict.fromkeys(exclude or []))

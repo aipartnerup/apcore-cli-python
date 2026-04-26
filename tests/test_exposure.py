@@ -150,3 +150,31 @@ class TestExposureFilterFromConfig:
         f = ExposureFilter.from_config({"expose": {"mode": "all", "include": ["admin.*"]}})
         assert f._mode == "all"
         assert f.is_exposed("webhooks.stripe") is True
+
+
+class TestUnknownModeClamp:
+    """D11-008: unknown mode values clamp to 'none' with a warning, matching
+    apcore-cli-rust/src/exposure.rs:70. Runtime decision was already
+    fail-closed (is_exposed default-False branch); this aligns the
+    persisted ``filter.mode`` value across the three SDKs.
+    """
+
+    def test_unknown_mode_clamps_to_none(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="apcore_cli.exposure"):
+            f = ExposureFilter(mode="bogus")
+        assert f._mode == "none"
+        assert "Unknown ExposureFilter mode 'bogus'" in caplog.text
+
+    def test_unknown_mode_still_fails_closed_on_is_exposed(self):
+        f = ExposureFilter(mode="totally-bogus")
+        assert f.is_exposed("anything.at.all") is False
+
+    def test_valid_modes_pass_through_unchanged(self):
+        for mode in ("all", "include", "exclude", "none"):
+            f = ExposureFilter(mode=mode)
+            assert f._mode == mode
+
+    def test_empty_string_mode_clamps(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="apcore_cli.exposure"):
+            f = ExposureFilter(mode="")
+        assert f._mode == "none"
