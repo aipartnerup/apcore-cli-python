@@ -291,13 +291,15 @@ class TestShellWiring:
 class TestConfigResolverWiring:
     """MED-2 fix: create_cli uses ConfigResolver."""
 
-    def test_create_cli_uses_config_resolver(self, tmp_path):
+    def test_create_cli_uses_config_resolver(self, tmp_path, monkeypatch):
         import pytest
 
         from apcore_cli.__main__ import create_cli
 
-        # When no extensions_dir override and default dir doesn't exist,
-        # create_cli should exit 47 via ConfigResolver default path
+        # Isolate: chdir to a fresh dir (no ./extensions) and clear env var so
+        # ConfigResolver defaults to "./extensions" which doesn't exist → exit 47.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("APCORE_EXTENSIONS_ROOT", raising=False)
         with pytest.raises(SystemExit) as exc_info:
             create_cli()
         assert exc_info.value.code == 47
