@@ -83,7 +83,14 @@ class CliApprovalHandler:
             logger.info("Approval bypassed via APCORE_CLI_AUTO_APPROVE for '%s'.", module_id)
             return {"status": "approved", "approved_by": "env_auto_approve"}
         if env_val != "" and env_val != "1":
-            logger.warning("APCORE_CLI_AUTO_APPROVE='%s', expected '1'. Ignoring.", env_val)
+            # D10-009 cross-SDK parity: emit to stderr (matching TS) so log
+            # capture / handler config does not mask the warning. Spec at
+            # apcore-cli/docs/features/approval-gate.md:122 says "Log WARNING"
+            # which was ambiguous; the three SDKs now agree on stderr.
+            print(
+                f"Warning: APCORE_CLI_AUTO_APPROVE is set to '{env_val}', expected '1'. Ignoring.",
+                file=sys.stderr,
+            )
 
         # Non-TTY: reject
         if not sys.stdin.isatty():
@@ -161,7 +168,12 @@ def check_approval(module_def: Any, auto_approve: bool, timeout: int = 60) -> No
         logger.info("Approval bypassed via APCORE_CLI_AUTO_APPROVE for '%s'.", module_id)
         return
     if env_val != "" and env_val != "1":
-        logger.warning("APCORE_CLI_AUTO_APPROVE='%s', expected '1'. Ignoring.", env_val)
+        # D10-009 cross-SDK parity: emit to stderr (matching TS) for
+        # consistent user-visible channel regardless of logger config.
+        print(
+            f"Warning: APCORE_CLI_AUTO_APPROVE is set to '{env_val}', expected '1'. Ignoring.",
+            file=sys.stderr,
+        )
 
     # Non-TTY check
     if not sys.stdin.isatty():

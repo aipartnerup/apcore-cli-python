@@ -92,13 +92,19 @@ class TestCheckApprovalBypass:
             check_approval(m, auto_approve=False)
         assert "bypassed via APCORE_CLI_AUTO_APPROVE" in caplog.text
 
-    def test_env_var_not_one_warns(self, monkeypatch, caplog):
+    def test_env_var_not_one_warns(self, monkeypatch, capsys):
+        # D10-009 cross-SDK parity: warning is now emitted on stderr (not
+        # via the Python logger) so callers see a consistent user-visible
+        # channel regardless of logger handler config. Test switched from
+        # caplog to capsys.
         monkeypatch.setenv("APCORE_CLI_AUTO_APPROVE", "true")
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         m = _make_module(requires_approval=True)
-        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"), pytest.raises(ApprovalDeniedError):
+        with pytest.raises(ApprovalDeniedError):
             check_approval(m, auto_approve=False)
-        assert "expected '1'" in caplog.text
+        captured = capsys.readouterr()
+        assert "expected '1'" in captured.err
+        assert "Warning:" in captured.err
 
     def test_yes_flag_priority_over_env(self, monkeypatch, caplog):
         monkeypatch.setenv("APCORE_CLI_AUTO_APPROVE", "1")
@@ -267,15 +273,18 @@ class TestCheckApprovalRaisesTypedErrors:
         ):
             check_approval(m, auto_approve=False)
 
-    def test_env_var_invalid_raises_approval_denied_error(self, monkeypatch, caplog):
+    def test_env_var_invalid_raises_approval_denied_error(self, monkeypatch, capsys):
         """Env var set to non-'1' should warn then take the non-TTY denial path
-        as a typed exception (not sys.exit)."""
+        as a typed exception (not sys.exit). D10-009 cross-SDK parity: the
+        warning emits on stderr, not via the Python logger.
+        """
         monkeypatch.setenv("APCORE_CLI_AUTO_APPROVE", "true")
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         m = _make_module(requires_approval=True)
-        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"), pytest.raises(ApprovalDeniedError):
+        with pytest.raises(ApprovalDeniedError):
             check_approval(m, auto_approve=False)
-        assert "expected '1'" in caplog.text
+        captured = capsys.readouterr()
+        assert "expected '1'" in captured.err
 
     def test_typed_errors_carry_code_attribute_for_error_code_map(self, monkeypatch):
         """The discovery.py exec_cmd handler maps ``e.code`` through
