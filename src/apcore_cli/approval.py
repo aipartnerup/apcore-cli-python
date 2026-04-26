@@ -195,9 +195,7 @@ def _prompt_with_timeout(module_def: Any, timeout: int = 60) -> None:
     try:
         approved = _tty_prompt(module_id, timeout)
     except ApprovalTimeoutError:
-        raise ApprovalTimeoutError(
-            f"Approval prompt timed out after {timeout} seconds."
-        ) from None
+        raise ApprovalTimeoutError(f"Approval prompt timed out after {timeout} seconds.") from None
 
     if approved:
         logger.info("User approved execution of module '%s'.", module_id)

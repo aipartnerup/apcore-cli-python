@@ -173,9 +173,7 @@ class TestSandbox:
             assert "APCORE_LOG_LEVEL" in call_env
             # Defense-in-depth: deny-set member must be stripped even though
             # it matches the allow prefix and not the AUTH_ deny prefix.
-            assert leaky_key not in call_env, (
-                f"{leaky_key} is in _SANDBOX_DENY_KEYS but leaked into the sandbox env"
-            )
+            assert leaky_key not in call_env, f"{leaky_key} is in _SANDBOX_DENY_KEYS but leaked into the sandbox env"
 
     def test_sandbox_env_strips_every_deny_key_member(self):
         """D11-002: for every key in the production _SANDBOX_DENY_KEYS, the

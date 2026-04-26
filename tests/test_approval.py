@@ -215,21 +215,22 @@ class TestCheckApprovalRaisesTypedErrors:
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
         m = _make_module(requires_approval=True)
-        with patch("apcore_cli.approval.click.confirm", return_value=False):
-            with pytest.raises(ApprovalDeniedError):
-                check_approval(m, auto_approve=False)
+        with patch("apcore_cli.approval.click.confirm", return_value=False), pytest.raises(ApprovalDeniedError):
+            check_approval(m, auto_approve=False)
 
     def test_tty_timeout_raises_approval_timeout_error(self, monkeypatch):
         """TTY timeout path: raise ApprovalTimeoutError, never sys.exit."""
         monkeypatch.setattr("sys.stdin.isatty", lambda: True)
         monkeypatch.delenv("APCORE_CLI_AUTO_APPROVE", raising=False)
         m = _make_module(requires_approval=True)
-        with patch(
-            "apcore_cli.approval.click.confirm",
-            side_effect=ApprovalTimeoutError(),
+        with (
+            patch(
+                "apcore_cli.approval.click.confirm",
+                side_effect=ApprovalTimeoutError(),
+            ),
+            pytest.raises(ApprovalTimeoutError),
         ):
-            with pytest.raises(ApprovalTimeoutError):
-                check_approval(m, auto_approve=False)
+            check_approval(m, auto_approve=False)
 
     def test_env_var_invalid_raises_approval_denied_error(self, monkeypatch, caplog):
         """Env var set to non-'1' should warn then take the non-TTY denial path
@@ -237,9 +238,8 @@ class TestCheckApprovalRaisesTypedErrors:
         monkeypatch.setenv("APCORE_CLI_AUTO_APPROVE", "true")
         monkeypatch.setattr("sys.stdin.isatty", lambda: False)
         m = _make_module(requires_approval=True)
-        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"):
-            with pytest.raises(ApprovalDeniedError):
-                check_approval(m, auto_approve=False)
+        with caplog.at_level(logging.WARNING, logger="apcore_cli.approval"), pytest.raises(ApprovalDeniedError):
+            check_approval(m, auto_approve=False)
         assert "expected '1'" in caplog.text
 
     def test_typed_errors_carry_code_attribute_for_error_code_map(self, monkeypatch):
