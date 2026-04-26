@@ -772,7 +772,7 @@ def build_module_command(
                 return
 
             # -- Standard execution (with optional strategy) --
-            sandbox = Sandbox(enabled=sandbox_flag, extensions_root=extensions_root)
+            sandbox = Sandbox(enabled=sandbox_flag).with_extensions_root(extensions_root)
             if strategy_name and hasattr(executor, "call_with_trace"):
                 if sandbox_flag:
                     # Sandbox mode: delegate to subprocess (strategy not available in sandbox)

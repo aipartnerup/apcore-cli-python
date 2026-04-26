@@ -93,7 +93,7 @@ class TestSandbox:
     def test_sandbox_extensions_root_injected_as_absolute(self):
         """C2: extensions_root kwarg must be injected as APCORE_EXTENSIONS_ROOT
         with an absolute path so module discovery works under cwd=tmpdir."""
-        sandbox = Sandbox(enabled=True, extensions_root="/abs/extensions")
+        sandbox = Sandbox(enabled=True).with_extensions_root("/abs/extensions")
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="{}", stderr="")
             with patch.dict("os.environ", {}, clear=True):
@@ -115,7 +115,7 @@ class TestSandbox:
 
     def test_sandbox_output_size_limit_raises(self):
         """W6 (D3): oversized subprocess output must raise ModuleExecutionError."""
-        sandbox = Sandbox(enabled=True, max_output_bytes=100)
+        sandbox = Sandbox(enabled=True).with_max_output_bytes(100)
         big_stdout = "x" * 200
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout=big_stdout, stderr="")
@@ -195,3 +195,51 @@ class TestSandbox:
             call_env = mock_run.call_args.kwargs.get("env") or mock_run.call_args[1].get("env")
             for key in deny_keys:
                 assert key not in call_env, f"{key} (deny set member) leaked into sandbox env"
+
+
+class TestConstructorCrossSDKParity:
+    """D1-001: Sandbox public constructor is (enabled, timeout_seconds) only.
+    Python-only knobs (extensions_root, max_output_bytes) are configured
+    through the builder-style ``with_*`` setters so the cross-SDK
+    constructor surface matches Rust's ``Sandbox::new(enabled, timeout_secs)``
+    and TS's ``new Sandbox(enabled, timeoutSeconds)``.
+    """
+
+    def test_constructor_takes_only_two_positional_args(self):
+        sandbox = Sandbox(enabled=True, timeout_seconds=42)
+        assert sandbox._enabled is True
+        assert sandbox._timeout_seconds == 42
+        # Defaults for Python-only knobs.
+        assert sandbox._extensions_root is None
+        assert sandbox._max_output_bytes == Sandbox.DEFAULT_MAX_OUTPUT_BYTES
+
+    def test_constructor_rejects_old_extensions_root_kwarg(self):
+        with pytest.raises(TypeError):
+            Sandbox(enabled=True, extensions_root="/abs/extensions")  # type: ignore[call-arg]
+
+    def test_constructor_rejects_old_max_output_bytes_kwarg(self):
+        with pytest.raises(TypeError):
+            Sandbox(enabled=True, max_output_bytes=100)  # type: ignore[call-arg]
+
+    def test_with_extensions_root_returns_self_for_chaining(self):
+        sandbox = Sandbox(enabled=True)
+        result = sandbox.with_extensions_root("/abs/path")
+        assert result is sandbox
+        assert sandbox._extensions_root == "/abs/path"
+
+    def test_with_max_output_bytes_returns_self_for_chaining(self):
+        sandbox = Sandbox(enabled=True)
+        result = sandbox.with_max_output_bytes(1024)
+        assert result is sandbox
+        assert sandbox._max_output_bytes == 1024
+
+    def test_chained_setters_preserve_each_other(self):
+        sandbox = (
+            Sandbox(enabled=True, timeout_seconds=60)
+            .with_extensions_root("/abs/extensions")
+            .with_max_output_bytes(2048)
+        )
+        assert sandbox._enabled is True
+        assert sandbox._timeout_seconds == 60
+        assert sandbox._extensions_root == "/abs/extensions"
+        assert sandbox._max_output_bytes == 2048

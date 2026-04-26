@@ -61,22 +61,46 @@ _SANDBOX_DENY_KEYS: frozenset[str] = frozenset({"APCORE_AUTH_API_KEY"})
 class Sandbox:
     """Subprocess-isolated module execution.
 
-    Audit D1-005 parity (v0.6.x): the `timeout_seconds` parameter mirrors
-    the Rust `Sandbox::new(enabled, timeout_ms)` API. When `enabled=False`,
-    `execute()` is a passthrough to the injected apcore Executor.
+    Cross-SDK constructor parity (D1-001): the public constructor is
+    ``Sandbox(enabled, timeout_seconds)`` mirroring
+    apcore-cli-rust ``Sandbox::new(enabled, timeout_secs)`` and
+    apcore-cli-typescript ``new Sandbox(enabled, timeoutSeconds)``.
+    Python-only hardening knobs (``extensions_root``,
+    ``max_output_bytes``) are configured post-construction via the
+    builder-style ``with_*`` setters below; they remain Python-only
+    until cross-SDK parity for the corresponding settings lands.
+
+    When ``enabled=False``, :meth:`execute` is a passthrough to the
+    injected apcore Executor.
     """
 
-    def __init__(
-        self,
-        enabled: bool = False,
-        timeout_seconds: int = 300,
-        extensions_root: str | None = None,
-        max_output_bytes: int = 64 * 1024 * 1024,
-    ) -> None:
+    DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024 * 1024
+
+    def __init__(self, enabled: bool = False, timeout_seconds: int = 300) -> None:
         self._enabled = enabled
         self._timeout_seconds = timeout_seconds
+        self._extensions_root: str | None = None
+        self._max_output_bytes: int = self.DEFAULT_MAX_OUTPUT_BYTES
+
+    def with_extensions_root(self, extensions_root: str | None) -> Sandbox:
+        """Set the extensions root that is forwarded to the sandboxed runner.
+
+        Builder-style — returns ``self`` so call sites can chain. Python-only
+        knob; no equivalent in the Rust or TypeScript SDKs at this writing
+        (D1-001 cross-SDK parity note in apcore-cli/docs/features/security.md).
+        """
         self._extensions_root = extensions_root
+        return self
+
+    def with_max_output_bytes(self, max_output_bytes: int) -> Sandbox:
+        """Cap the post-capture stdout+stderr byte budget for the sandboxed
+        subprocess. Default: 64 MiB (:attr:`DEFAULT_MAX_OUTPUT_BYTES`).
+
+        Builder-style — returns ``self``. Python-only knob; no equivalent
+        in the Rust or TypeScript SDKs at this writing.
+        """
         self._max_output_bytes = max_output_bytes
+        return self
 
     def execute(self, module_id: str, input_data: dict, executor: Executor) -> Any:
         if not self._enabled:
